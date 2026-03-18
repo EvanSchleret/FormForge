@@ -1,0 +1,101 @@
+<?php
+
+declare(strict_types=1);
+
+namespace EvanSchleret\FormForge;
+
+use EvanSchleret\FormForge\Commands\DescribeCommand;
+use EvanSchleret\FormForge\Commands\HttpOptionsCommand;
+use EvanSchleret\FormForge\Commands\HttpResolveCommand;
+use EvanSchleret\FormForge\Commands\HttpRoutesCommand;
+use EvanSchleret\FormForge\Commands\InstallCommand;
+use EvanSchleret\FormForge\Commands\ListCommand;
+use EvanSchleret\FormForge\Commands\SyncCommand;
+use EvanSchleret\FormForge\Commands\UploadsCleanupCommand;
+use EvanSchleret\FormForge\Http\EndpointRequestGuard;
+use EvanSchleret\FormForge\Http\HttpOptionsResolver;
+use EvanSchleret\FormForge\Http\Middleware\ApplyEndpointOptions;
+use EvanSchleret\FormForge\Persistence\FormDefinitionRepository;
+use EvanSchleret\FormForge\Registry\FormRegistry;
+use EvanSchleret\FormForge\Submissions\SubmissionService;
+use EvanSchleret\FormForge\Submissions\SubmissionValidator;
+use EvanSchleret\FormForge\Submissions\StagedUploadService;
+use EvanSchleret\FormForge\Submissions\UploadManager;
+use Illuminate\Support\ServiceProvider;
+
+class FormForgeServiceProvider extends ServiceProvider
+{
+    public function register(): void
+    {
+        $this->mergeConfigFrom(dirname(__DIR__) . '/config/formforge.php', 'formforge');
+
+        $this->app->singleton(FormRegistry::class, static fn (): FormRegistry => new FormRegistry());
+        $this->app->singleton(FormDefinitionRepository::class, static fn (): FormDefinitionRepository => new FormDefinitionRepository());
+        $this->app->singleton(SubmissionValidator::class, static fn (): SubmissionValidator => new SubmissionValidator());
+        $this->app->singleton(StagedUploadService::class, static fn (): StagedUploadService => new StagedUploadService());
+        $this->app->singleton(
+            UploadManager::class,
+            fn (): UploadManager => new UploadManager(
+                stagedUploads: $this->app->make(StagedUploadService::class),
+            ),
+        );
+        $this->app->singleton(HttpOptionsResolver::class, static fn (): HttpOptionsResolver => new HttpOptionsResolver());
+        $this->app->singleton(
+            EndpointRequestGuard::class,
+            fn (): EndpointRequestGuard => new EndpointRequestGuard(
+                router: $this->app->make('router'),
+                pipeline: $this->app->make(\Illuminate\Pipeline\Pipeline::class),
+            ),
+        );
+
+        $this->app->singleton(
+            SubmissionService::class,
+            fn (): SubmissionService => new SubmissionService(
+                validator: $this->app->make(SubmissionValidator::class),
+                uploadManager: $this->app->make(UploadManager::class),
+            ),
+        );
+
+        $this->app->singleton(
+            FormManager::class,
+            fn (): FormManager => new FormManager(
+                registry: $this->app->make(FormRegistry::class),
+                repository: $this->app->make(FormDefinitionRepository::class),
+                submissionService: $this->app->make(SubmissionService::class),
+            ),
+        );
+    }
+
+    public function boot(): void
+    {
+        $this->loadMigrationsFrom(dirname(__DIR__) . '/database/migrations');
+
+        $this->publishes([
+            dirname(__DIR__) . '/config/formforge.php' => config_path('formforge.php'),
+        ], 'formforge-config');
+
+        $this->publishes([
+            dirname(__DIR__) . '/database/migrations' => database_path('migrations'),
+        ], 'formforge-migrations');
+
+        $router = $this->app->make('router');
+        $router->aliasMiddleware('formforge.endpoint', ApplyEndpointOptions::class);
+
+        if ((bool) config('formforge.http.enabled', true)) {
+            $this->loadRoutesFrom(dirname(__DIR__) . '/routes/formforge.php');
+        }
+
+        if ($this->app->runningInConsole()) {
+            $this->commands([
+                InstallCommand::class,
+                ListCommand::class,
+                DescribeCommand::class,
+                SyncCommand::class,
+                HttpOptionsCommand::class,
+                HttpResolveCommand::class,
+                HttpRoutesCommand::class,
+                UploadsCleanupCommand::class,
+            ]);
+        }
+    }
+}
