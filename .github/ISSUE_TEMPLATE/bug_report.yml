@@ -1,0 +1,55 @@
+name: Bug report
+description: Report a reproducible bug in FormForge
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for opening a bug report.
+        Please provide enough details to reproduce the issue.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is the bug?
+      placeholder: A clear and concise description of the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Minimal, reproducible steps.
+      placeholder: |
+        1. Define form ...
+        2. Submit payload ...
+        3. Observe error ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened?
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Please share runtime versions and context.
+      placeholder: |
+        - FormForge version:
+        - Laravel version:
+        - PHP version:
+        - Database driver:
+    validations:
+      required: true
