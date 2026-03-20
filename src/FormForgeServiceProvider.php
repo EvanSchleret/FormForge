@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace EvanSchleret\FormForge;
 
 use EvanSchleret\FormForge\Commands\DescribeCommand;
+use EvanSchleret\FormForge\Commands\DraftsCleanupCommand;
 use EvanSchleret\FormForge\Commands\HttpOptionsCommand;
 use EvanSchleret\FormForge\Commands\HttpResolveCommand;
 use EvanSchleret\FormForge\Commands\HttpRoutesCommand;
@@ -21,6 +22,7 @@ use EvanSchleret\FormForge\Persistence\FormDefinitionRepository;
 use EvanSchleret\FormForge\Registry\FormRegistry;
 use EvanSchleret\FormForge\Submissions\SubmissionService;
 use EvanSchleret\FormForge\Submissions\SubmissionValidator;
+use EvanSchleret\FormForge\Submissions\DraftStateService;
 use EvanSchleret\FormForge\Submissions\StagedUploadService;
 use EvanSchleret\FormForge\Submissions\UploadManager;
 use Illuminate\Support\ServiceProvider;
@@ -38,6 +40,7 @@ class FormForgeServiceProvider extends ServiceProvider
         ));
         $this->app->singleton(IdempotencyService::class, static fn (): IdempotencyService => new IdempotencyService());
         $this->app->singleton(SubmissionValidator::class, static fn (): SubmissionValidator => new SubmissionValidator());
+        $this->app->singleton(DraftStateService::class, static fn (): DraftStateService => new DraftStateService());
         $this->app->singleton(StagedUploadService::class, static fn (): StagedUploadService => new StagedUploadService());
         $this->app->singleton(
             UploadManager::class,
@@ -101,6 +104,7 @@ class FormForgeServiceProvider extends ServiceProvider
                 HttpResolveCommand::class,
                 HttpRoutesCommand::class,
                 UploadsCleanupCommand::class,
+                DraftsCleanupCommand::class,
             ]);
         }
     }

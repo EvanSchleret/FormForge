@@ -5,8 +5,8 @@
 <h1 align="center">FormForge</h1>
 
 <p align="center">
-  Deterministic dynamic forms for Laravel with immutable revisions, strict validation,
-  configurable HTTP security, and file upload workflows.
+  Deterministic dynamic forms for Laravel with immutable revisions, conditional layouts,
+  strict server-side validation, robust HTTP security, and staged file workflows.
 </p>
 
 <p align="center">
@@ -19,13 +19,14 @@
 
 ## Why FormForge
 
-FormForge gives you a single backend source of truth for:
+FormForge gives you one backend source of truth for:
 
-- form schema and field rules
-- immutable revisions and version history
-- submission validation and storage
-- configurable HTTP auth/middleware per endpoint
-- managed/direct/staged file workflows
+- form schema with deterministic keys
+- pages, sections, and conditional visibility rules
+- immutable revision history (`create`, `patch`, `publish`, `unpublish`)
+- strict payload validation on effective (condition-resolved) schema
+- configurable endpoint security (`auth`, `guard`, `middleware`, `ability`)
+- file workflows for multipart and JSON-first clients
 
 ## Requirements
 
@@ -39,7 +40,7 @@ FormForge gives you a single backend source of truth for:
 composer require evanschleret/formforge
 ```
 
-Publish package files:
+Publish config + migrations:
 
 ```bash
 php artisan formforge:install
@@ -51,7 +52,7 @@ Run migrations:
 php artisan migrate
 ```
 
-## Basic usage (runtime DSL)
+## Quick start
 
 ```php
 <?php
@@ -71,14 +72,14 @@ Form::define('contact')
 Form::sync();
 ```
 
-Get a resolved form schema:
+Get schema:
 
 ```php
 $form = Form::get('contact');
 $schema = $form->toArray();
 ```
 
-Submit payload:
+Submit:
 
 ```php
 $submission = $form->submit([
@@ -87,6 +88,29 @@ $submission = $form->submit([
     'message' => 'Hello',
 ]);
 ```
+
+## Schema model
+
+Every normalized schema contains:
+
+- `key`, `version`, `title`
+- flattened `fields`
+- `pages[].sections[].fields[]`
+- `conditions[]`
+- `drafts.enabled`
+
+When only `fields` are provided, FormForge auto-wraps them into a default page/section.
+
+### Conditional rules
+
+Conditions support:
+
+- `target_type`: `page|section|field`
+- `action`: `show|hide|skip|require|disable`
+- `match`: `all|any`
+- operators: `eq`, `neq`, `in`, `not_in`, `gt`, `gte`, `lt`, `lte`, `contains`, `not_contains`, `is_empty`, `not_empty`
+
+At submission time, FormForge resolves the effective schema from payload + conditions, then validates against that effective shape.
 
 ## HTTP API
 
@@ -103,57 +127,76 @@ Default prefix: `api/formforge/v1`
 - `POST /forms/{key}/submit`
 - `POST /forms/{key}/versions/{version}/submit`
 
-### Staged upload endpoints
+### Resolve endpoints (debug/effective schema)
+
+- `POST /forms/{key}/resolve`
+- `POST /forms/{key}/versions/{version}/resolve`
+
+By default, these endpoints are only enabled in `local` and `testing` environments.
+
+### Upload staging endpoints
 
 - `POST /forms/{key}/uploads/stage`
 - `POST /forms/{key}/versions/{version}/uploads/stage`
 
-### Management endpoints (production-ready)
+### Draft endpoints (authenticated owner-based state)
 
-- `POST /forms` (create draft, key auto-generated)
+- `POST /forms/{key}/drafts`
+- `GET /forms/{key}/drafts/current`
+- `DELETE /forms/{key}/drafts/current`
+
+Draft behavior:
+
+- user-bound (polymorphic owner)
+- last write wins
+- one draft per `(form_key, owner)`
+- optional TTL cleanup
+- rejected when form-level drafts are disabled
+
+### Management endpoints
+
+- `POST /forms` (create revision 1, key auto-generated if absent)
 - `PATCH /forms/{key}` (creates a new draft revision)
 - `POST /forms/{key}/publish` (creates a new published revision)
 - `POST /forms/{key}/unpublish` (creates a new draft revision)
-- `DELETE /forms/{key}` (soft delete all revisions for this key)
-- `GET /forms/{key}/revisions` (history; supports `include_deleted=1`)
+- `DELETE /forms/{key}` (soft delete all revisions)
+- `GET /forms/{key}/revisions` (`include_deleted=1` supported)
 - `GET /forms/{key}/diff/{fromVersion}/{toVersion}`
 
-### Management payload notes
-
-- `POST /forms` expects at least:
-  - `title` (string)
-  - `fields` (array)
-- `key` is auto-generated from title (slug + collision suffix)
-- revision numbers are auto-incremented integers (`1`, `2`, `3`, ...)
-
-### Publishability rule
+## Publishability
 
 A form can be published only when:
 
-- `title` is not empty
-- `fields` has at least one field
+- `title` is non-empty
+- at least one page exists
+- at least one section exists
+- at least one field exists
 
 ## Endpoint security model
 
-Security is layered:
+Security layers:
 
-1. Global route middleware: `formforge.http.middleware`
-2. Endpoint-level options (`schema`, `submission`, `upload`, `management`):
+1. Global route middleware (`formforge.http.middleware`)
+2. Endpoint options (`schema`, `submission`, `upload`, `resolve`, `draft`, `management`):
    - `auth`: `public|optional|required`
-   - `guard`: auth guard name
-   - `middleware`: dynamic middleware stack
-   - `ability` and per-action `abilities` (management)
+   - `guard`
+   - `middleware`
+   - `ability` (and per-action `abilities` for management)
 
 Example:
 
 ```php
 'http' => [
     'middleware' => ['api'],
+    'draft' => [
+        'auth' => 'required',
+        'guard' => 'sanctum',
+        'middleware' => ['throttle:60,1'],
+        'ability' => 'formforge.draft',
+    ],
     'management' => [
         'auth' => 'required',
         'guard' => 'sanctum',
-        'middleware' => ['throttle:30,1'],
-        'ability' => null,
         'abilities' => [
             'create' => 'formforge.create',
             'update' => 'formforge.update',
@@ -167,16 +210,47 @@ Example:
 ],
 ```
 
-You can also inject custom middleware aliases via Laravel router middleware registration and then use them in FormForge config.
+## Test mode submissions
+
+`_formforge_test` (or configured header) enables test submissions when:
+
+- `formforge.submissions.testing.enabled = true`
+- current environment is in `formforge.submissions.testing.enabled_environments`
+
+By default, allowed environments are `local` and `testing`.
+
+## Validation rules
+
+Validation is Laravel-native:
+
+- automatic deterministic rules by field type
+- `rules(...)` appends custom rules
+- `replaceRules(...)` fully overrides generated rules
+- API payload rules are string/array Laravel rules
+
+Reference: [Laravel validation rules](https://laravel.com/docs/validation#available-validation-rules)
+
+## Upload modes
+
+`formforge.uploads.mode` supports:
+
+- `managed`: multipart submit with file objects
+- `direct`: submit payload references already-uploaded files
+- `staged`: upload first, then submit JSON with `upload_token`
+
+For JSON-first clients, staged mode is recommended:
+
+1. `POST /forms/{key}/uploads/stage` (multipart)
+2. `POST /forms/{key}/submit` with JSON payload containing `upload_token`
 
 ## Idempotency
 
-Management mutations support the `Idempotency-Key` header.
+Management mutations support `Idempotency-Key`:
 
-- Same key + same payload: replayed response
-- Same key + different payload: `409 Conflict`
+- same key + same payload => replayed response
+- same key + different payload => `409 Conflict`
 
-TTL is configurable:
+TTL:
 
 ```php
 'http' => [
@@ -184,34 +258,6 @@ TTL is configurable:
         'ttl_minutes' => 1440,
     ],
 ],
-```
-
-## Validation rules
-
-Field rules are deterministic:
-
-- auto-rules by field type
-- `rules(...)` appends custom rules
-- `replaceRules(...)` overrides auto-rules completely
-
-Laravel rules from API payload are string/array based.
-
-Reference: [Laravel validation rules](https://laravel.com/docs/validation#available-validation-rules)
-
-## Upload strategy
-
-`uploads.mode` supports:
-
-- `managed`: multipart file in submit request
-- `direct`: payload references existing files
-- `staged`: upload first, then submit JSON with `upload_token`
-
-Cleanup command for expired staged tokens:
-
-```bash
-php artisan formforge:uploads:cleanup
-php artisan formforge:uploads:cleanup --dry-run
-php artisan formforge:uploads:cleanup --keep-files
 ```
 
 ## Useful commands
@@ -225,25 +271,27 @@ php artisan formforge:http:options
 php artisan formforge:http:routes
 php artisan formforge:http:resolve contact --endpoint=submission --form-version=1
 php artisan formforge:uploads:cleanup
+php artisan formforge:drafts:cleanup
 ```
 
 ## Laravel Boost AI assets
 
-FormForge now ships package-level Boost assets for AI-assisted implementation:
+FormForge ships package-level Laravel Boost assets:
 
 - `resources/boost/guidelines/core.blade.php`
 - `resources/boost/skills/formforge-integration/SKILL.md`
 
-These assets define implementation constraints, recommended workflows, and endpoint/security patterns for AI agents.
+Use them to guide AI agents implementing FormForge in Laravel APIs.
 
 ## Roadmap
 
 - [ ] Add first-class signed upload URL flow for object storage direct upload
-- [ ] Add optional per-form policy hooks for fine-grained authorization
-- [ ] Add dry-run migration report command for schema and submission migrations
 - [ ] Add cleanup command for expired idempotency keys
-- [ ] Add OpenAPI export command for FormForge HTTP endpoints and payload schemas
-- [ ] Add policy scaffold command for management abilities
+- [ ] Add OpenAPI export command for FormForge HTTP contracts
+- [ ] Add policy scaffold command for management/draft abilities
+- [ ] Add revision migration tooling (dry-run + apply) for schema evolution
+- [ ] Add full FormForge sections/pages analytics helpers
+- [ ] Add first-party Laravel Boost template pack for FormForge + auth presets
 
 ## Other packages
 

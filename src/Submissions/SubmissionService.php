@@ -6,6 +6,7 @@ namespace EvanSchleret\FormForge\Submissions;
 
 use EvanSchleret\FormForge\Definition\FieldType;
 use EvanSchleret\FormForge\Models\FormSubmission;
+use EvanSchleret\FormForge\Support\FormSchemaLayout;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -29,8 +30,9 @@ class SubmissionService
         array $submissionMeta = [],
     ): FormSubmission
     {
-        $validated = $this->validator->validate($schema, $payload);
-        $fields = Arr::get($schema, 'fields', []);
+        $effectiveSchema = FormSchemaLayout::resolve($schema, $payload);
+        $validated = $this->validator->validate($effectiveSchema, $payload);
+        $fields = Arr::get($effectiveSchema, 'fields', []);
 
         if (! is_array($fields)) {
             $fields = [];
@@ -40,8 +42,8 @@ class SubmissionService
         $storeIp = (bool) config('formforge.submissions.store_ip', true);
         $storeUserAgent = (bool) config('formforge.submissions.store_user_agent', true);
 
-        $submission = DB::transaction(function () use ($schema, $fields, $validated, $submittedBy, $request, $storeIp, $storeUserAgent, $isTest, $submissionMeta): FormSubmission {
-            [$normalizedPayload, $files] = $this->normalizePayload($schema, $fields, $validated, $submittedBy);
+        $submission = DB::transaction(function () use ($effectiveSchema, $fields, $validated, $submittedBy, $request, $storeIp, $storeUserAgent, $isTest, $submissionMeta): FormSubmission {
+            [$normalizedPayload, $files] = $this->normalizePayload($effectiveSchema, $fields, $validated, $submittedBy);
 
             $meta = $submissionMeta;
 
@@ -50,8 +52,8 @@ class SubmissionService
             }
 
             $submission = FormSubmission::query()->create([
-                'form_key' => (string) ($schema['key'] ?? ''),
-                'form_version' => (string) ($schema['version'] ?? ''),
+                'form_key' => (string) ($effectiveSchema['key'] ?? ''),
+                'form_version' => (string) ($effectiveSchema['version'] ?? ''),
                 'payload' => $normalizedPayload,
                 'is_test' => $isTest,
                 'submitted_by_type' => $submittedBy?->getMorphClass(),

@@ -25,8 +25,8 @@ class HttpResolveCommand extends Command
             $version = null;
         }
 
-        if (! in_array($endpoint, ['schema', 'submission', 'upload', 'management'], true)) {
-            $this->error("Unsupported endpoint [{$endpoint}]. Allowed: schema, submission, upload, management.");
+        if (! in_array($endpoint, ['schema', 'submission', 'upload', 'management', 'resolve', 'draft'], true)) {
+            $this->error("Unsupported endpoint [{$endpoint}]. Allowed: schema, submission, upload, management, resolve, draft.");
 
             return self::FAILURE;
         }

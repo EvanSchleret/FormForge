@@ -6,6 +6,8 @@ use EvanSchleret\FormForge\Http\Controllers\FormSchemaController;
 use EvanSchleret\FormForge\Http\Controllers\FormSubmissionController;
 use EvanSchleret\FormForge\Http\Controllers\FormUploadController;
 use EvanSchleret\FormForge\Http\Controllers\FormManagementController;
+use EvanSchleret\FormForge\Http\Controllers\FormResolveController;
+use EvanSchleret\FormForge\Http\Controllers\FormDraftController;
 use Illuminate\Support\Facades\Route;
 
 $prefix = trim((string) config('formforge.http.prefix', 'api/formforge/v1'), '/');
@@ -32,6 +34,17 @@ Route::prefix($prefix)
         Route::middleware('formforge.endpoint:upload')->group(static function (): void {
             Route::post('/forms/{key}/uploads/stage', [FormUploadController::class, 'stageLatest']);
             Route::post('/forms/{key}/versions/{version}/uploads/stage', [FormUploadController::class, 'stageVersion']);
+        });
+
+        Route::middleware('formforge.endpoint:resolve')->group(static function (): void {
+            Route::post('/forms/{key}/resolve', [FormResolveController::class, 'resolveLatest']);
+            Route::post('/forms/{key}/versions/{version}/resolve', [FormResolveController::class, 'resolveVersion']);
+        });
+
+        Route::middleware('formforge.endpoint:draft')->group(static function (): void {
+            Route::post('/forms/{key}/drafts', [FormDraftController::class, 'save']);
+            Route::get('/forms/{key}/drafts/current', [FormDraftController::class, 'current']);
+            Route::delete('/forms/{key}/drafts/current', [FormDraftController::class, 'delete']);
         });
 
         Route::middleware('formforge.endpoint:management,create')->group(static function (): void {

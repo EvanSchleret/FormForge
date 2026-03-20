@@ -22,6 +22,7 @@ return [
         'submission_files_table' => 'formforge_submission_files',
         'staged_uploads_table' => 'formforge_staged_uploads',
         'idempotency_keys_table' => 'formforge_idempotency_keys',
+        'drafts_table' => 'formforge_drafts',
     ],
 
     /*
@@ -42,6 +43,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Drafts
+    |--------------------------------------------------------------------------
+    |
+    | Draft persistence settings used by HTTP draft endpoints.
+    | Drafts are tied to authenticated users and form keys.
+    |
+    */
+
+    'drafts' => [
+        // Enable draft persistence by default for forms that do not override drafts.enabled in schema.
+        'default_enabled' => env('FORMFORGE_DRAFTS_DEFAULT_ENABLED', false),
+        // Number of days before an inactive draft expires. Set to 0 to disable expiration.
+        'ttl_days' => env('FORMFORGE_DRAFTS_TTL_DAYS', 30),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Submissions
     |--------------------------------------------------------------------------
     |
@@ -58,6 +76,8 @@ return [
             'allow_on_unpublished' => env('FORMFORGE_TEST_ON_UNPUBLISHED', true),
             'flag' => env('FORMFORGE_TEST_FLAG', '_formforge_test'),
             'header' => env('FORMFORGE_TEST_HEADER', 'X-FormForge-Test'),
+            // Restrict test submissions to these environments.
+            'enabled_environments' => ['local', 'testing'],
         ],
     ],
 
@@ -125,12 +145,26 @@ return [
         'idempotency' => [
             'ttl_minutes' => env('FORMFORGE_HTTP_IDEMPOTENCY_TTL', 1440),
         ],
+        'resolve' => [
+            'auth' => 'public',
+            'guard' => null,
+            'middleware' => [],
+            // Resolve endpoint is intended for local/debug tooling by default.
+            'enabled_environments' => ['local', 'testing'],
+        ],
         'schema' => [
             'public' => true,
             'auth' => 'public',
             'guard' => null,
             'middleware' => [],
             'require_published' => false,
+        ],
+        'draft' => [
+            'auth' => 'required',
+            'guard' => null,
+            'middleware' => ['throttle:60,1'],
+            // Optional Gate ability applied to draft save/current/delete endpoints.
+            'ability' => null,
         ],
         'submission' => [
             'auth' => 'public',
@@ -157,6 +191,7 @@ return [
                 'delete' => null,
                 'revisions' => null,
                 'diff' => null,
+                'drafts' => null,
             ],
         ],
     ],

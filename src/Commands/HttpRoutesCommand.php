@@ -26,6 +26,8 @@ class HttpRoutesCommand extends Command
         $submission = $resolver->resolve('submission');
         $upload = $resolver->resolve('upload');
         $management = $resolver->resolve('management');
+        $resolve = $resolver->resolve('resolve');
+        $draft = $resolver->resolve('draft');
 
         $rows = [
             ['GET', '/' . $prefix . '/forms/{key}', 'schema', $schema['auth'], $schema['guard'] ?? '-', implode(', ', $schema['middleware'] ?? [])],
@@ -35,6 +37,11 @@ class HttpRoutesCommand extends Command
             ['POST', '/' . $prefix . '/forms/{key}/versions/{version}/submit', 'submission', $submission['auth'], $submission['guard'] ?? '-', implode(', ', $submission['middleware'] ?? [])],
             ['POST', '/' . $prefix . '/forms/{key}/uploads/stage', 'upload', $upload['auth'], $upload['guard'] ?? '-', implode(', ', $upload['middleware'] ?? [])],
             ['POST', '/' . $prefix . '/forms/{key}/versions/{version}/uploads/stage', 'upload', $upload['auth'], $upload['guard'] ?? '-', implode(', ', $upload['middleware'] ?? [])],
+            ['POST', '/' . $prefix . '/forms/{key}/resolve', 'resolve', $resolve['auth'], $resolve['guard'] ?? '-', implode(', ', $resolve['middleware'] ?? [])],
+            ['POST', '/' . $prefix . '/forms/{key}/versions/{version}/resolve', 'resolve', $resolve['auth'], $resolve['guard'] ?? '-', implode(', ', $resolve['middleware'] ?? [])],
+            ['POST', '/' . $prefix . '/forms/{key}/drafts', 'draft', $draft['auth'], $draft['guard'] ?? '-', implode(', ', $draft['middleware'] ?? [])],
+            ['GET', '/' . $prefix . '/forms/{key}/drafts/current', 'draft', $draft['auth'], $draft['guard'] ?? '-', implode(', ', $draft['middleware'] ?? [])],
+            ['DELETE', '/' . $prefix . '/forms/{key}/drafts/current', 'draft', $draft['auth'], $draft['guard'] ?? '-', implode(', ', $draft['middleware'] ?? [])],
             ['POST', '/' . $prefix . '/forms', 'management(create)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])],
             ['PATCH', '/' . $prefix . '/forms/{key}', 'management(update)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])],
             ['POST', '/' . $prefix . '/forms/{key}/publish', 'management(publish)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])],

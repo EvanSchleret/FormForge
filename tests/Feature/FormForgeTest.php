@@ -7,6 +7,7 @@ use EvanSchleret\FormForge\Exceptions\InvalidFieldDefinitionException;
 use EvanSchleret\FormForge\Exceptions\UnknownFieldsException;
 use EvanSchleret\FormForge\Facades\Form;
 use EvanSchleret\FormForge\FormManager;
+use EvanSchleret\FormForge\Models\FormDraft;
 use EvanSchleret\FormForge\Models\StagedUpload;
 use EvanSchleret\FormForge\Registry\FormRegistry;
 use EvanSchleret\FormForge\Tests\Fixtures\User;
@@ -424,4 +425,55 @@ it('can keep temporary files while cleaning expired staged upload tokens', funct
         'id' => $expired->id,
     ]);
     Storage::disk('local')->assertExists('formforge/tmp/expired-keep-files.pdf');
+});
+
+it('cleans up expired drafts', function (): void {
+    $expired = FormDraft::query()->create([
+        'form_key' => 'draft_cleanup',
+        'form_version' => '1',
+        'owner_type' => User::class,
+        'owner_id' => '1',
+        'payload' => ['name' => 'Expired'],
+        'meta' => ['step' => 'main'],
+        'expires_at' => Carbon::now()->subMinute(),
+    ]);
+
+    $active = FormDraft::query()->create([
+        'form_key' => 'draft_cleanup',
+        'form_version' => '1',
+        'owner_type' => User::class,
+        'owner_id' => '2',
+        'payload' => ['name' => 'Active'],
+        'meta' => ['step' => 'main'],
+        'expires_at' => Carbon::now()->addDay(),
+    ]);
+
+    $this->artisan('formforge:drafts:cleanup --chunk=1')
+        ->assertExitCode(0);
+
+    $this->assertDatabaseMissing('formforge_drafts', [
+        'id' => $expired->id,
+    ]);
+    $this->assertDatabaseHas('formforge_drafts', [
+        'id' => $active->id,
+    ]);
+});
+
+it('supports dry-run cleanup for expired drafts', function (): void {
+    $expired = FormDraft::query()->create([
+        'form_key' => 'draft_cleanup',
+        'form_version' => '1',
+        'owner_type' => User::class,
+        'owner_id' => '1',
+        'payload' => ['name' => 'Expired'],
+        'meta' => ['step' => 'main'],
+        'expires_at' => Carbon::now()->subMinute(),
+    ]);
+
+    $this->artisan('formforge:drafts:cleanup --dry-run')
+        ->assertExitCode(0);
+
+    $this->assertDatabaseHas('formforge_drafts', [
+        'id' => $expired->id,
+    ]);
 });

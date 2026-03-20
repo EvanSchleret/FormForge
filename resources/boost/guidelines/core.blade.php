@@ -6,6 +6,8 @@ Use these rules when implementing or extending FormForge integrations in Laravel
 
 - Keep form schemas deterministic and immutable by revision.
 - Treat `key` as a stable public identifier.
+- Build forms with `pages[].sections[].fields[]` as canonical layout.
+- Keep conditional behavior server-resolved and server-validated.
 - Create new revisions for changes (`PATCH`, `publish`, `unpublish`), never mutate an existing revision.
 - Keep management operations idempotent when `Idempotency-Key` is provided.
 
@@ -19,11 +21,17 @@ Use these rules when implementing or extending FormForge integrations in Laravel
   - `DELETE /forms/{key}`
   - `GET /forms/{key}/revisions`
   - `GET /forms/{key}/diff/{fromVersion}/{toVersion}`
+- Resolve/draft endpoints:
+  - `POST /forms/{key}/resolve`
+  - `POST /forms/{key}/drafts`
+  - `GET /forms/{key}/drafts/current`
+  - `DELETE /forms/{key}/drafts/current`
 - Schema/submission/upload endpoints remain independent and backward-compatible.
 
 ## Security
 
 - Use `formforge.http.management` options for auth, guard, middleware, and abilities.
+- Use `formforge.http.draft` options for auth/middleware/ability.
 - Prefer explicit abilities for each management action.
 - Keep public defaults only when intentional.
 - For stricter access control, combine abilities with custom middleware aliases.
@@ -34,6 +42,8 @@ Use these rules when implementing or extending FormForge integrations in Laravel
 - Do not rely on runtime closures or object rules from API payloads.
 - Enforce publishability constraints before publishing:
   - non-empty title
+  - at least one page
+  - at least one section
   - at least one field
 
 ## Revision strategy
@@ -46,6 +56,7 @@ Use these rules when implementing or extending FormForge integrations in Laravel
 
 - Use `managed`, `direct`, or `staged` modes per project requirements.
 - For JSON-first clients, prefer staged upload + token submission.
+- Keep draft TTL and cleanup configured when draft persistence is enabled.
 
 ## DX expectations
 

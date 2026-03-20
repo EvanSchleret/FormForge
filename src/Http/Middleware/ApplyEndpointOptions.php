@@ -75,6 +75,18 @@ class ApplyEndpointOptions
             return [$form, $this->resolver->resolve('upload', $form->toArray())];
         }
 
+        if ($endpoint === 'resolve') {
+            $form = $this->resolveSubmissionForm($request);
+
+            return [$form, $this->resolver->resolve('resolve')];
+        }
+
+        if ($endpoint === 'draft') {
+            $form = $this->resolveSubmissionForm($request);
+
+            return [$form, $this->resolver->resolve('draft')];
+        }
+
         if ($endpoint === 'management') {
             return [null, $this->resolver->resolve('management')];
         }

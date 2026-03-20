@@ -12,6 +12,7 @@ use EvanSchleret\FormForge\Models\FormDefinition;
 use EvanSchleret\FormForge\Persistence\FormDefinitionRepository;
 use EvanSchleret\FormForge\Registry\FormRegistry;
 use EvanSchleret\FormForge\Submissions\SubmissionService;
+use EvanSchleret\FormForge\Support\FormSchemaLayout;
 use EvanSchleret\FormForge\Support\Schema;
 use EvanSchleret\FormForge\Support\Version;
 use Illuminate\Support\Facades\DB;
@@ -233,6 +234,6 @@ class FormManager
 
     private function newInstance(array $schema): FormInstance
     {
-        return new FormInstance($schema, $this->submissionService);
+        return new FormInstance(FormSchemaLayout::normalize($schema), $this->submissionService);
     }
 }

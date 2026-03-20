@@ -433,3 +433,233 @@ it('returns a diff between two form versions', function (): void {
         ->assertJsonPath('data.from_version', 1)
         ->assertJsonPath('data.to_version', 2);
 });
+
+it('resolves effective schema over HTTP with conditional visibility', function (): void {
+    $create = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Resolve Conditions',
+        'pages' => [
+            [
+                'page_key' => 'pg_main',
+                'title' => 'Main',
+                'sections' => [
+                    [
+                        'section_key' => 'sc_main',
+                        'title' => 'Main',
+                        'fields' => [
+                            [
+                                'field_key' => 'fk_has_company',
+                                'type' => 'checkbox',
+                                'name' => 'has_company',
+                            ],
+                            [
+                                'field_key' => 'fk_company_name',
+                                'type' => 'text',
+                                'name' => 'company_name',
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ],
+        'conditions' => [
+            [
+                'condition_key' => 'cd_hide_company',
+                'target_type' => 'field',
+                'target_key' => 'fk_company_name',
+                'action' => 'hide',
+                'match' => 'all',
+                'when' => [
+                    [
+                        'field_key' => 'fk_has_company',
+                        'operator' => 'eq',
+                        'value' => false,
+                    ],
+                ],
+            ],
+        ],
+        'drafts' => [
+            'enabled' => true,
+        ],
+    ])->assertCreated();
+
+    $key = (string) $create->json('data.key');
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/resolve", [
+        'payload' => [
+            'has_company' => false,
+        ],
+        'debug' => true,
+    ])
+        ->assertOk()
+        ->assertJsonPath('data.schema.fields.0.name', 'has_company')
+        ->assertJsonCount(1, 'data.schema.fields')
+        ->assertJsonPath('data.schema.debug.conditions.0.matched', true);
+});
+
+it('returns not found on resolve endpoint when environment is not allowed', function (): void {
+    config()->set('formforge.http.resolve.enabled_environments', ['local']);
+
+    $key = 'resolve_env_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')->required();
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/resolve", [
+        'payload' => ['name' => 'Evan'],
+    ])->assertNotFound();
+});
+
+it('stores, reads and deletes authenticated draft states', function (): void {
+    config()->set('formforge.drafts.default_enabled', true);
+
+    $key = 'draft_http_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')
+        ->email('email');
+
+    $user = User::query()->create([
+        'name' => 'Draft User',
+    ]);
+
+    $this->actingAs($user)->postJson("/api/formforge/v1/forms/{$key}/drafts", [
+        'payload' => [
+            'name' => 'Alice',
+            'email' => 'alice@example.com',
+        ],
+        'meta' => [
+            'step' => 'main',
+        ],
+    ])
+        ->assertOk()
+        ->assertJsonPath('data.form_key', $key)
+        ->assertJsonPath('data.payload.name', 'Alice')
+        ->assertJsonPath('data.meta.step', 'main');
+
+    $this->actingAs($user)->getJson("/api/formforge/v1/forms/{$key}/drafts/current")
+        ->assertOk()
+        ->assertJsonPath('data.form_key', $key)
+        ->assertJsonPath('data.payload.email', 'alice@example.com');
+
+    $this->actingAs($user)->deleteJson("/api/formforge/v1/forms/{$key}/drafts/current")
+        ->assertOk()
+        ->assertJsonPath('data.deleted', true);
+
+    $this->actingAs($user)->getJson("/api/formforge/v1/forms/{$key}/drafts/current")
+        ->assertOk()
+        ->assertJsonPath('data', null);
+});
+
+it('isolates draft states per authenticated user', function (): void {
+    config()->set('formforge.drafts.default_enabled', true);
+
+    $key = 'draft_isolation_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name');
+
+    $first = User::query()->create(['name' => 'First']);
+    $second = User::query()->create(['name' => 'Second']);
+
+    $this->actingAs($first)->postJson("/api/formforge/v1/forms/{$key}/drafts", [
+        'payload' => ['name' => 'Alice'],
+    ])->assertOk();
+
+    $this->actingAs($second)->postJson("/api/formforge/v1/forms/{$key}/drafts", [
+        'payload' => ['name' => 'Bob'],
+    ])->assertOk();
+
+    $this->actingAs($first)->getJson("/api/formforge/v1/forms/{$key}/drafts/current")
+        ->assertOk()
+        ->assertJsonPath('data.payload.name', 'Alice');
+
+    $this->actingAs($second)->getJson("/api/formforge/v1/forms/{$key}/drafts/current")
+        ->assertOk()
+        ->assertJsonPath('data.payload.name', 'Bob');
+});
+
+it('rejects draft endpoints when drafts are disabled for form', function (): void {
+    config()->set('formforge.drafts.default_enabled', false);
+
+    $key = 'draft_disabled_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name');
+
+    $user = User::query()->create(['name' => 'Draft Disabled']);
+
+    $this->actingAs($user)->postJson("/api/formforge/v1/forms/{$key}/drafts", [
+        'payload' => ['name' => 'Alice'],
+    ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('draft');
+});
+
+it('rejects draft endpoint requests without an authenticated owner', function (): void {
+    config()->set('formforge.http.draft.auth', 'public');
+    config()->set('formforge.drafts.default_enabled', true);
+
+    $key = 'draft_guest_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name');
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/drafts", [
+        'payload' => ['name' => 'Guest'],
+    ])->assertUnauthorized();
+});
+
+it('supports draft endpoint ability authorization', function (): void {
+    config()->set('formforge.http.draft.auth', 'required');
+    config()->set('formforge.http.draft.ability', 'formforge.draft');
+    config()->set('formforge.drafts.default_enabled', true);
+
+    Gate::define('formforge.draft', static fn (?User $user): bool => $user !== null && $user->name === 'allowed');
+
+    $key = 'draft_ability_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name');
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/drafts", [
+        'payload' => ['name' => 'Guest'],
+    ])->assertUnauthorized();
+
+    $denied = User::query()->create(['name' => 'denied']);
+
+    $this->actingAs($denied)->postJson("/api/formforge/v1/forms/{$key}/drafts", [
+        'payload' => ['name' => 'Denied'],
+    ])->assertForbidden();
+
+    $allowed = User::query()->create(['name' => 'allowed']);
+
+    $this->actingAs($allowed)->postJson("/api/formforge/v1/forms/{$key}/drafts", [
+        'payload' => ['name' => 'Allowed'],
+    ])
+        ->assertOk()
+        ->assertJsonPath('data.payload.name', 'Allowed');
+});
+
+it('rejects test submissions outside configured environments', function (): void {
+    config()->set('formforge.submissions.testing.enabled_environments', ['local']);
+
+    $key = 'test_env_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->unpublished()
+        ->text('name')->required();
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        '_formforge_test' => true,
+        'name' => 'Debug',
+    ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('test');
+});

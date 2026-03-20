@@ -10,7 +10,7 @@ class HttpOptionsResolver
 {
     public function resolve(string $endpoint, ?array $formSchema = null): array
     {
-        if (! in_array($endpoint, ['schema', 'submission', 'upload', 'management'], true)) {
+        if (! in_array($endpoint, ['schema', 'submission', 'upload', 'management', 'resolve', 'draft'], true)) {
             throw new FormForgeException("Unsupported HTTP endpoint type [{$endpoint}].");
         }
 
@@ -35,7 +35,7 @@ class HttpOptionsResolver
 
         $resolved = array_merge($defaults, $endpointConfig);
 
-        if ($formSchema !== null && $endpoint !== 'management') {
+        if ($formSchema !== null && ! in_array($endpoint, ['management', 'draft', 'resolve'], true)) {
             $override = $this->extractFormOverride($formSchema, $endpoint);
             $resolved = $this->mergeEndpointConfig($resolved, $override);
         }

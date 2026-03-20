@@ -39,6 +39,31 @@ class FormInstance
         return is_array($fields) ? $fields : [];
     }
 
+    public function pages(): array
+    {
+        $pages = $this->schema['pages'] ?? [];
+
+        return is_array($pages) ? $pages : [];
+    }
+
+    public function conditions(): array
+    {
+        $conditions = $this->schema['conditions'] ?? [];
+
+        return is_array($conditions) ? $conditions : [];
+    }
+
+    public function draftsEnabled(): bool
+    {
+        $drafts = $this->schema['drafts'] ?? [];
+
+        if (! is_array($drafts)) {
+            return (bool) config('formforge.drafts.default_enabled', false);
+        }
+
+        return (bool) ($drafts['enabled'] ?? config('formforge.drafts.default_enabled', false));
+    }
+
     public function category(): string
     {
         return (string) ($this->schema['category'] ?? config('formforge.forms.default_category', 'general'));

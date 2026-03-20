@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace EvanSchleret\FormForge\Definition;
 
 use EvanSchleret\FormForge\Exceptions\InvalidFieldDefinitionException;
+use EvanSchleret\FormForge\Support\FormSchemaLayout;
 use EvanSchleret\FormForge\Support\Schema;
 
 class FormBlueprint
@@ -359,7 +360,7 @@ class FormBlueprint
             $schema['api'] = $this->api;
         }
 
-        return $schema;
+        return FormSchemaLayout::normalize($schema);
     }
 
     public function schemaHash(): string

@@ -133,6 +133,12 @@ class FormSubmissionController
             ]);
         }
 
+        if ($resolved && ! $this->isTestModeAvailable()) {
+            throw ValidationException::withMessages([
+                'test' => ['Test submissions are not available in this environment.'],
+            ]);
+        }
+
         return $resolved && $enabled;
     }
 
@@ -194,5 +200,22 @@ class FormSubmissionController
         }
 
         return null;
+    }
+
+    private function isTestModeAvailable(): bool
+    {
+        $environments = config('formforge.submissions.testing.enabled_environments', ['local', 'testing']);
+
+        if (! is_array($environments) || $environments === []) {
+            return false;
+        }
+
+        $environments = array_values(array_filter(array_map(static fn (mixed $value): string => trim((string) $value), $environments), static fn (string $value): bool => $value !== ''));
+
+        if ($environments === []) {
+            return false;
+        }
+
+        return app()->environment($environments);
     }
 }

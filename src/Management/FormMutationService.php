@@ -9,6 +9,7 @@ use EvanSchleret\FormForge\Exceptions\FormForgeException;
 use EvanSchleret\FormForge\Exceptions\FormNotFoundException;
 use EvanSchleret\FormForge\Models\FormDefinition;
 use EvanSchleret\FormForge\Persistence\FormDefinitionRepository;
+use EvanSchleret\FormForge\Support\FormSchemaLayout;
 use EvanSchleret\FormForge\Support\Schema;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
@@ -26,6 +27,9 @@ class FormMutationService
     {
         $title = trim((string) ($input['title'] ?? ''));
         $fields = $input['fields'] ?? [];
+        $pages = $input['pages'] ?? [];
+        $conditions = $input['conditions'] ?? [];
+        $drafts = $input['drafts'] ?? [];
         $category = $this->normalizedOptionalString($input['category'] ?? null);
         $api = $this->normalizedArray($input['api'] ?? []);
         $meta = $this->normalizedArray($input['meta'] ?? []);
@@ -38,6 +42,9 @@ class FormMutationService
             versionNumber: $versionNumber,
             title: $title,
             fields: $fields,
+            pages: $pages,
+            conditions: $conditions,
+            drafts: $drafts,
             category: $category,
             api: $api,
             published: false,
@@ -70,6 +77,18 @@ class FormMutationService
             ? $this->normalizedArray($input['fields'])
             : ($currentSchema['fields'] ?? []);
 
+        $pages = array_key_exists('pages', $input)
+            ? $this->normalizedArray($input['pages'])
+            : $this->normalizedArray($currentSchema['pages'] ?? []);
+
+        $conditions = array_key_exists('conditions', $input)
+            ? $this->normalizedArray($input['conditions'])
+            : $this->normalizedArray($currentSchema['conditions'] ?? []);
+
+        $drafts = array_key_exists('drafts', $input)
+            ? $this->normalizedArray($input['drafts'])
+            : $this->normalizedArray($currentSchema['drafts'] ?? []);
+
         $category = array_key_exists('category', $input)
             ? $this->normalizedOptionalString($input['category'])
             : $this->normalizedOptionalString($currentSchema['category'] ?? null);
@@ -87,6 +106,9 @@ class FormMutationService
             versionNumber: $nextVersion,
             title: $title,
             fields: $fields,
+            pages: $pages,
+            conditions: $conditions,
+            drafts: $drafts,
             category: $category,
             api: $api,
             published: false,
@@ -115,10 +137,11 @@ class FormMutationService
 
         $currentSchema = is_array($latest->schema) ? $latest->schema : [];
         $title = trim((string) ($currentSchema['title'] ?? ''));
+        $pages = $this->normalizedArray($currentSchema['pages'] ?? []);
         $fields = $currentSchema['fields'] ?? [];
 
-        if ($title === '' || ! is_array($fields) || count($fields) === 0) {
-            throw new FormForgeException('Form cannot be published: title and at least one field are required.');
+        if (! $this->isPublishable($title, $pages, $fields)) {
+            throw new FormForgeException('Form cannot be published: title, at least one page, one section, and one field are required.');
         }
 
         $nextVersion = $this->repository->nextVersionNumber($key, true);
@@ -128,6 +151,9 @@ class FormMutationService
             versionNumber: $nextVersion,
             title: $title,
             fields: $fields,
+            pages: $pages,
+            conditions: $this->normalizedArray($currentSchema['conditions'] ?? []),
+            drafts: $this->normalizedArray($currentSchema['drafts'] ?? []),
             category: $this->normalizedOptionalString($currentSchema['category'] ?? null),
             api: $this->normalizedArray($currentSchema['api'] ?? []),
             published: true,
@@ -162,6 +188,9 @@ class FormMutationService
             versionNumber: $nextVersion,
             title: trim((string) ($currentSchema['title'] ?? '')),
             fields: $currentSchema['fields'] ?? [],
+            pages: $this->normalizedArray($currentSchema['pages'] ?? []),
+            conditions: $this->normalizedArray($currentSchema['conditions'] ?? []),
+            drafts: $this->normalizedArray($currentSchema['drafts'] ?? []),
             category: $this->normalizedOptionalString($currentSchema['category'] ?? null),
             api: $this->normalizedArray($currentSchema['api'] ?? []),
             published: false,
@@ -354,6 +383,9 @@ class FormMutationService
         int $versionNumber,
         string $title,
         mixed $fields,
+        mixed $pages,
+        mixed $conditions,
+        mixed $drafts,
         ?string $category,
         array $api,
         bool $published,
@@ -366,11 +398,31 @@ class FormMutationService
             throw new FormForgeException('Form fields payload must be an array.');
         }
 
+        if (! is_array($pages)) {
+            throw new FormForgeException('Form pages payload must be an array.');
+        }
+
+        if (! is_array($conditions)) {
+            throw new FormForgeException('Form conditions payload must be an array.');
+        }
+
+        if (! is_array($drafts)) {
+            throw new FormForgeException('Form drafts payload must be an object.');
+        }
+
+        $normalizedFields = $fields;
+
+        if ($pages !== []) {
+            $normalizedFields = FormSchemaLayout::flattenFields([
+                'pages' => $pages,
+            ]);
+        }
+
         $schema = [
             'key' => $key,
             'version' => (string) $versionNumber,
             'title' => $title,
-            'fields' => $fields,
+            'fields' => $normalizedFields,
             'is_published' => $published,
         ];
 
@@ -383,9 +435,127 @@ class FormMutationService
         }
 
         $normalized = FormBlueprint::fromSchemaArray($schema)->toSchemaArray();
+        $normalizedPages = $pages === []
+            ? $this->normalizedArray($normalized['pages'] ?? [])
+            : $this->applyNormalizedFieldsToPages($pages, $this->normalizedArray($normalized['fields'] ?? []));
+
+        $normalized['pages'] = $normalizedPages;
+        $normalized['conditions'] = $conditions;
+        $normalized['drafts'] = $drafts;
+        $normalized = FormSchemaLayout::normalize($normalized);
         $normalized['is_published'] = $published;
 
         return $normalized;
+    }
+
+    private function applyNormalizedFieldsToPages(array $pages, array $fields): array
+    {
+        $byName = [];
+        $byFieldKey = [];
+
+        foreach ($fields as $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+
+            $name = trim((string) ($field['name'] ?? ''));
+            $fieldKey = trim((string) ($field['field_key'] ?? ''));
+
+            if ($name !== '') {
+                $byName[$name] = $field;
+            }
+
+            if ($fieldKey !== '') {
+                $byFieldKey[$fieldKey] = $field;
+            }
+        }
+
+        $resolved = [];
+
+        foreach ($pages as $page) {
+            if (! is_array($page)) {
+                continue;
+            }
+
+            $sections = $this->normalizedArray($page['sections'] ?? []);
+            $resolvedSections = [];
+
+            foreach ($sections as $section) {
+                if (! is_array($section)) {
+                    continue;
+                }
+
+                $resolvedFields = [];
+
+                foreach ($this->normalizedArray($section['fields'] ?? []) as $fieldRaw) {
+                    if (! is_array($fieldRaw)) {
+                        continue;
+                    }
+
+                    $name = trim((string) ($fieldRaw['name'] ?? ''));
+                    $fieldKey = trim((string) ($fieldRaw['field_key'] ?? ''));
+                    $normalizedField = $byFieldKey[$fieldKey] ?? ($byName[$name] ?? null);
+
+                    if (! is_array($normalizedField)) {
+                        continue;
+                    }
+
+                    $resolvedFields[] = array_merge($fieldRaw, $normalizedField);
+                }
+
+                $section['fields'] = $resolvedFields;
+                $resolvedSections[] = $section;
+            }
+
+            $page['sections'] = $resolvedSections;
+            $resolved[] = $page;
+        }
+
+        return $resolved;
+    }
+
+    private function isPublishable(string $title, array $pages, mixed $fields): bool
+    {
+        if ($title === '') {
+            return false;
+        }
+
+        if (! is_array($fields) || $fields === []) {
+            return false;
+        }
+
+        if ($pages === []) {
+            return false;
+        }
+
+        $hasSection = false;
+
+        foreach ($pages as $page) {
+            if (! is_array($page)) {
+                continue;
+            }
+
+            $sections = $page['sections'] ?? [];
+
+            if (! is_array($sections) || $sections === []) {
+                continue;
+            }
+
+            foreach ($sections as $section) {
+                if (! is_array($section)) {
+                    continue;
+                }
+
+                $sectionFields = $section['fields'] ?? [];
+
+                if (is_array($sectionFields) && $sectionFields !== []) {
+                    $hasSection = true;
+                    break 2;
+                }
+            }
+        }
+
+        return $hasSection;
     }
 
     private function buildGeneratedKey(string $title): string
