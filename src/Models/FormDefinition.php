@@ -6,15 +6,22 @@ namespace EvanSchleret\FormForge\Models;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class FormDefinition extends Model
 {
+    use SoftDeletes;
+
     protected $guarded = [];
 
     protected $casts = [
         'schema' => 'array',
+        'meta' => 'array',
         'is_active' => 'boolean',
         'is_published' => 'boolean',
+        'published_at' => 'datetime',
+        'version_number' => 'integer',
+        'deleted_at' => 'datetime',
     ];
 
     public function getTable(): string

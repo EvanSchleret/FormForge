@@ -10,7 +10,7 @@ class HttpOptionsResolver
 {
     public function resolve(string $endpoint, ?array $formSchema = null): array
     {
-        if (! in_array($endpoint, ['schema', 'submission', 'upload'], true)) {
+        if (! in_array($endpoint, ['schema', 'submission', 'upload', 'management'], true)) {
             throw new FormForgeException("Unsupported HTTP endpoint type [{$endpoint}].");
         }
 
@@ -18,6 +18,8 @@ class HttpOptionsResolver
             'auth' => 'public',
             'guard' => null,
             'middleware' => [],
+            'ability' => null,
+            'abilities' => [],
         ];
 
         $http = (array) config('formforge.http', []);
@@ -33,7 +35,7 @@ class HttpOptionsResolver
 
         $resolved = array_merge($defaults, $endpointConfig);
 
-        if ($formSchema !== null) {
+        if ($formSchema !== null && $endpoint !== 'management') {
             $override = $this->extractFormOverride($formSchema, $endpoint);
             $resolved = $this->mergeEndpointConfig($resolved, $override);
         }
@@ -41,6 +43,8 @@ class HttpOptionsResolver
         $resolved['auth'] = $this->normalizeAuthMode((string) ($resolved['auth'] ?? 'public'));
         $resolved['guard'] = $this->normalizeGuard($resolved['guard'] ?? null);
         $resolved['middleware'] = $this->normalizeMiddleware($resolved['middleware'] ?? []);
+        $resolved['ability'] = $this->normalizeAbility($resolved['ability'] ?? null);
+        $resolved['abilities'] = $this->normalizeAbilities($resolved['abilities'] ?? []);
 
         return $resolved;
     }
@@ -92,6 +96,15 @@ class HttpOptionsResolver
                 continue;
             }
 
+            if ($key === 'abilities') {
+                $merged['abilities'] = array_merge(
+                    $this->normalizeAbilities($merged['abilities'] ?? []),
+                    $this->normalizeAbilities($value),
+                );
+
+                continue;
+            }
+
             $merged[$key] = $value;
         }
 
@@ -118,6 +131,37 @@ class HttpOptionsResolver
         $guard = trim($guard);
 
         return $guard === '' ? null : $guard;
+    }
+
+    private function normalizeAbility(mixed $ability): ?string
+    {
+        if (! is_string($ability)) {
+            return null;
+        }
+
+        $ability = trim($ability);
+
+        return $ability === '' ? null : $ability;
+    }
+
+    private function normalizeAbilities(mixed $abilities): array
+    {
+        if (! is_array($abilities)) {
+            return [];
+        }
+
+        $normalized = [];
+
+        foreach ($abilities as $action => $ability) {
+            $actionName = trim((string) $action);
+            $abilityName = $this->normalizeAbility($ability);
+
+            if ($actionName !== '' && $abilityName !== null) {
+                $normalized[$actionName] = $abilityName;
+            }
+        }
+
+        return $normalized;
     }
 
     private function normalizeMiddleware(mixed $middleware): array

@@ -21,6 +21,7 @@ return [
         'submissions_table' => 'formforge_submissions',
         'submission_files_table' => 'formforge_submission_files',
         'staged_uploads_table' => 'formforge_staged_uploads',
+        'idempotency_keys_table' => 'formforge_idempotency_keys',
     ],
 
     /*
@@ -121,6 +122,9 @@ return [
         'enabled' => true,
         'prefix' => 'api/formforge/v1',
         'middleware' => ['api'],
+        'idempotency' => [
+            'ttl_minutes' => env('FORMFORGE_HTTP_IDEMPOTENCY_TTL', 1440),
+        ],
         'schema' => [
             'public' => true,
             'auth' => 'public',
@@ -139,6 +143,21 @@ return [
             'guard' => null,
             'middleware' => ['throttle:60,1'],
             'require_published' => false,
+        ],
+        'management' => [
+            'auth' => 'public',
+            'guard' => null,
+            'middleware' => ['throttle:60,1'],
+            'ability' => null,
+            'abilities' => [
+                'create' => null,
+                'update' => null,
+                'publish' => null,
+                'unpublish' => null,
+                'delete' => null,
+                'revisions' => null,
+                'diff' => null,
+            ],
         ],
     ],
 ];

@@ -67,7 +67,8 @@ jobs:
             "illuminate/http:${{ matrix.laravel }}" \
             "illuminate/support:${{ matrix.laravel }}" \
             "illuminate/validation:${{ matrix.laravel }}" \
-            "orchestra/testbench:${{ matrix.testbench }}"
+            "orchestra/testbench:${{ matrix.testbench }}" \
+            "phpunit/phpunit:^11.5 || ^12.0"
 
       - name: Install dependencies
         run: composer update --${{ matrix.dependency-version }} --prefer-dist --no-interaction --no-progress

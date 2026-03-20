@@ -10,6 +10,7 @@ use Illuminate\Contracts\Auth\Guard;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Router;
 use Illuminate\Pipeline\Pipeline;
+use Illuminate\Support\Facades\Gate;
 
 class EndpointRequestGuard
 {
@@ -30,6 +31,8 @@ class EndpointRequestGuard
         }
 
         if ($authMode === 'public') {
+            $this->authorize($request, $options, $guard);
+
             return;
         }
 
@@ -40,6 +43,8 @@ class EndpointRequestGuard
                 auth()->user();
             }
 
+            $this->authorize($request, $options, $guard);
+
             return;
         }
 
@@ -48,6 +53,8 @@ class EndpointRequestGuard
         if (! $authGuard->check()) {
             throw new AuthenticationException('Unauthenticated.', $guard === null ? [] : [$guard]);
         }
+
+        $this->authorize($request, $options, $guard);
     }
 
     public function runDynamicMiddleware(Request $request, array $middleware, callable $next): mixed
@@ -88,5 +95,64 @@ class EndpointRequestGuard
     private function activeGuard(?string $guard): Guard
     {
         return $guard === null ? auth()->guard() : auth()->guard($guard);
+    }
+
+    private function authorize(Request $request, array $options, ?string $guard): void
+    {
+        $ability = $this->resolveAbility($request, $options);
+
+        if ($ability === null) {
+            return;
+        }
+
+        $user = $guard === null ? auth()->user() : auth($guard)->user();
+
+        if ($user === null) {
+            throw new AuthenticationException('Unauthenticated.', $guard === null ? [] : [$guard]);
+        }
+
+        $arguments = $request->attributes->get('formforge.authorization.arguments');
+
+        if (is_array($arguments)) {
+            Gate::forUser($user)->authorize($ability, $arguments);
+
+            return;
+        }
+
+        if ($arguments !== null) {
+            Gate::forUser($user)->authorize($ability, [$arguments]);
+
+            return;
+        }
+
+        Gate::forUser($user)->authorize($ability);
+    }
+
+    private function resolveAbility(Request $request, array $options): ?string
+    {
+        $base = $this->normalizeAbility($options['ability'] ?? null);
+        $abilities = $options['abilities'] ?? [];
+        $action = trim((string) $request->attributes->get('formforge.endpoint.action', ''));
+
+        if ($action !== '' && is_array($abilities) && array_key_exists($action, $abilities)) {
+            $resolved = $this->normalizeAbility($abilities[$action] ?? null);
+
+            if ($resolved !== null) {
+                return $resolved;
+            }
+        }
+
+        return $base;
+    }
+
+    private function normalizeAbility(mixed $ability): ?string
+    {
+        if (! is_string($ability)) {
+            return null;
+        }
+
+        $ability = trim($ability);
+
+        return $ability === '' ? null : $ability;
     }
 }

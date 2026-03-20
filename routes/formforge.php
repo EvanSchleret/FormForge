@@ -5,6 +5,7 @@ declare(strict_types=1);
 use EvanSchleret\FormForge\Http\Controllers\FormSchemaController;
 use EvanSchleret\FormForge\Http\Controllers\FormSubmissionController;
 use EvanSchleret\FormForge\Http\Controllers\FormUploadController;
+use EvanSchleret\FormForge\Http\Controllers\FormManagementController;
 use Illuminate\Support\Facades\Route;
 
 $prefix = trim((string) config('formforge.http.prefix', 'api/formforge/v1'), '/');
@@ -31,5 +32,33 @@ Route::prefix($prefix)
         Route::middleware('formforge.endpoint:upload')->group(static function (): void {
             Route::post('/forms/{key}/uploads/stage', [FormUploadController::class, 'stageLatest']);
             Route::post('/forms/{key}/versions/{version}/uploads/stage', [FormUploadController::class, 'stageVersion']);
+        });
+
+        Route::middleware('formforge.endpoint:management,create')->group(static function (): void {
+            Route::post('/forms', [FormManagementController::class, 'create']);
+        });
+
+        Route::middleware('formforge.endpoint:management,update')->group(static function (): void {
+            Route::patch('/forms/{key}', [FormManagementController::class, 'patch']);
+        });
+
+        Route::middleware('formforge.endpoint:management,publish')->group(static function (): void {
+            Route::post('/forms/{key}/publish', [FormManagementController::class, 'publish']);
+        });
+
+        Route::middleware('formforge.endpoint:management,unpublish')->group(static function (): void {
+            Route::post('/forms/{key}/unpublish', [FormManagementController::class, 'unpublish']);
+        });
+
+        Route::middleware('formforge.endpoint:management,delete')->group(static function (): void {
+            Route::delete('/forms/{key}', [FormManagementController::class, 'delete']);
+        });
+
+        Route::middleware('formforge.endpoint:management,revisions')->group(static function (): void {
+            Route::get('/forms/{key}/revisions', [FormManagementController::class, 'revisions']);
+        });
+
+        Route::middleware('formforge.endpoint:management,diff')->group(static function (): void {
+            Route::get('/forms/{key}/diff/{fromVersion}/{toVersion}', [FormManagementController::class, 'diff']);
         });
     });

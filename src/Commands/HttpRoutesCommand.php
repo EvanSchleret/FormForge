@@ -25,6 +25,7 @@ class HttpRoutesCommand extends Command
         $schema = $resolver->resolve('schema');
         $submission = $resolver->resolve('submission');
         $upload = $resolver->resolve('upload');
+        $management = $resolver->resolve('management');
 
         $rows = [
             ['GET', '/' . $prefix . '/forms/{key}', 'schema', $schema['auth'], $schema['guard'] ?? '-', implode(', ', $schema['middleware'] ?? [])],
@@ -34,6 +35,13 @@ class HttpRoutesCommand extends Command
             ['POST', '/' . $prefix . '/forms/{key}/versions/{version}/submit', 'submission', $submission['auth'], $submission['guard'] ?? '-', implode(', ', $submission['middleware'] ?? [])],
             ['POST', '/' . $prefix . '/forms/{key}/uploads/stage', 'upload', $upload['auth'], $upload['guard'] ?? '-', implode(', ', $upload['middleware'] ?? [])],
             ['POST', '/' . $prefix . '/forms/{key}/versions/{version}/uploads/stage', 'upload', $upload['auth'], $upload['guard'] ?? '-', implode(', ', $upload['middleware'] ?? [])],
+            ['POST', '/' . $prefix . '/forms', 'management(create)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])],
+            ['PATCH', '/' . $prefix . '/forms/{key}', 'management(update)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])],
+            ['POST', '/' . $prefix . '/forms/{key}/publish', 'management(publish)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])],
+            ['POST', '/' . $prefix . '/forms/{key}/unpublish', 'management(unpublish)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])],
+            ['DELETE', '/' . $prefix . '/forms/{key}', 'management(delete)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])],
+            ['GET', '/' . $prefix . '/forms/{key}/revisions', 'management(revisions)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])],
+            ['GET', '/' . $prefix . '/forms/{key}/diff/{fromVersion}/{toVersion}', 'management(diff)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])],
         ];
 
         $this->info('Global route middleware');

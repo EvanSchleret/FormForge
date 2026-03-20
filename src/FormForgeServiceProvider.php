@@ -15,6 +15,8 @@ use EvanSchleret\FormForge\Commands\UploadsCleanupCommand;
 use EvanSchleret\FormForge\Http\EndpointRequestGuard;
 use EvanSchleret\FormForge\Http\HttpOptionsResolver;
 use EvanSchleret\FormForge\Http\Middleware\ApplyEndpointOptions;
+use EvanSchleret\FormForge\Management\FormMutationService;
+use EvanSchleret\FormForge\Management\IdempotencyService;
 use EvanSchleret\FormForge\Persistence\FormDefinitionRepository;
 use EvanSchleret\FormForge\Registry\FormRegistry;
 use EvanSchleret\FormForge\Submissions\SubmissionService;
@@ -31,6 +33,10 @@ class FormForgeServiceProvider extends ServiceProvider
 
         $this->app->singleton(FormRegistry::class, static fn (): FormRegistry => new FormRegistry());
         $this->app->singleton(FormDefinitionRepository::class, static fn (): FormDefinitionRepository => new FormDefinitionRepository());
+        $this->app->singleton(FormMutationService::class, fn (): FormMutationService => new FormMutationService(
+            repository: $this->app->make(FormDefinitionRepository::class),
+        ));
+        $this->app->singleton(IdempotencyService::class, static fn (): IdempotencyService => new IdempotencyService());
         $this->app->singleton(SubmissionValidator::class, static fn (): SubmissionValidator => new SubmissionValidator());
         $this->app->singleton(StagedUploadService::class, static fn (): StagedUploadService => new StagedUploadService());
         $this->app->singleton(

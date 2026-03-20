@@ -22,7 +22,7 @@ class ApplyEndpointOptions
     ) {
     }
 
-    public function handle(Request $request, Closure $next, string $endpoint): mixed
+    public function handle(Request $request, Closure $next, string $endpoint, ?string $action = null): mixed
     {
         try {
             [$form, $options] = $this->resolve($request, $endpoint);
@@ -32,6 +32,16 @@ class ApplyEndpointOptions
 
         if ($form !== null) {
             $request->attributes->set('formforge.form', $form);
+        }
+
+        if (is_string($action) && trim($action) !== '') {
+            $request->attributes->set('formforge.endpoint.action', trim($action));
+        }
+
+        $key = trim((string) $request->route('key'));
+
+        if ($key !== '') {
+            $request->attributes->set('formforge.authorization.arguments', [$key]);
         }
 
         $request->attributes->set('formforge.http.options', $options);
@@ -63,6 +73,10 @@ class ApplyEndpointOptions
             $form = $this->resolveSubmissionForm($request);
 
             return [$form, $this->resolver->resolve('upload', $form->toArray())];
+        }
+
+        if ($endpoint === 'management') {
+            return [null, $this->resolver->resolve('management')];
         }
 
         return [null, $this->resolver->resolve($endpoint)];

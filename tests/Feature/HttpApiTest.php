@@ -6,6 +6,7 @@ use EvanSchleret\FormForge\Facades\Form;
 use EvanSchleret\FormForge\Tests\Fixtures\MarkSubmissionMiddleware;
 use EvanSchleret\FormForge\Tests\Fixtures\User;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -248,4 +249,187 @@ it('supports staged upload then JSON submit with upload_token', function (): voi
 
     $path = (string) $submitResponse->json('data.payload.resume.path');
     Storage::disk('local')->assertExists($path);
+});
+
+it('creates a form revision through management endpoint', function (): void {
+    $response = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Contact Form',
+        'fields' => [
+            [
+                'type' => 'text',
+                'name' => 'name',
+                'required' => true,
+            ],
+        ],
+        'category' => 'contact',
+    ]);
+
+    $response
+        ->assertCreated()
+        ->assertJsonPath('data.title', 'Contact Form')
+        ->assertJsonPath('data.version_number', 1)
+        ->assertJsonPath('data.is_published', false);
+
+    $key = (string) $response->json('data.key');
+
+    expect($key)->not->toBe('');
+
+    $this->getJson("/api/formforge/v1/forms/{$key}")
+        ->assertOk()
+        ->assertJsonPath('data.title', 'Contact Form');
+});
+
+it('patches a form and creates a new draft revision', function (): void {
+    $create = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Survey V1',
+        'fields' => [
+            ['type' => 'text', 'name' => 'name', 'required' => true],
+        ],
+    ])->assertCreated();
+
+    $key = (string) $create->json('data.key');
+
+    $patch = $this->patchJson("/api/formforge/v1/forms/{$key}", [
+        'title' => 'Survey V2',
+        'fields' => [
+            ['type' => 'text', 'name' => 'name', 'required' => true],
+            ['type' => 'email', 'name' => 'email', 'required' => true],
+        ],
+    ]);
+
+    $patch
+        ->assertOk()
+        ->assertJsonPath('data.version_number', 2)
+        ->assertJsonPath('data.title', 'Survey V2')
+        ->assertJsonPath('data.is_published', false);
+
+    $this->getJson("/api/formforge/v1/forms/{$key}")
+        ->assertOk()
+        ->assertJsonPath('data.version', '2')
+        ->assertJsonPath('data.title', 'Survey V2');
+});
+
+it('publishes and unpublishes through revisioned endpoints', function (): void {
+    $create = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Feedback',
+        'fields' => [
+            ['type' => 'text', 'name' => 'message', 'required' => true],
+        ],
+    ])->assertCreated();
+
+    $key = (string) $create->json('data.key');
+
+    $publish = $this->postJson("/api/formforge/v1/forms/{$key}/publish");
+
+    $publish
+        ->assertOk()
+        ->assertJsonPath('data.is_published', true)
+        ->assertJsonPath('data.version_number', 2);
+
+    $unpublish = $this->postJson("/api/formforge/v1/forms/{$key}/unpublish");
+
+    $unpublish
+        ->assertOk()
+        ->assertJsonPath('data.is_published', false)
+        ->assertJsonPath('data.version_number', 3);
+});
+
+it('replays idempotent create requests', function (): void {
+    $payload = [
+        'title' => 'Idempotent Form',
+        'fields' => [
+            ['type' => 'text', 'name' => 'name', 'required' => true],
+        ],
+    ];
+
+    $first = $this
+        ->withHeaders(['Idempotency-Key' => 'idem-create-1'])
+        ->postJson('/api/formforge/v1/forms', $payload);
+
+    $first
+        ->assertCreated()
+        ->assertJsonPath('meta.replayed', false);
+
+    $second = $this
+        ->withHeaders(['Idempotency-Key' => 'idem-create-1'])
+        ->postJson('/api/formforge/v1/forms', $payload);
+
+    $second
+        ->assertCreated()
+        ->assertJsonPath('meta.replayed', true)
+        ->assertJsonPath('data.revision_id', $first->json('data.revision_id'));
+});
+
+it('supports management ability authorization', function (): void {
+    config()->set('formforge.http.management.auth', 'required');
+    config()->set('formforge.http.management.abilities.create', 'formforge.create');
+
+    Gate::define('formforge.create', static fn (?User $user): bool => $user !== null && $user->name === 'allowed');
+
+    $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Forbidden',
+        'fields' => [['type' => 'text', 'name' => 'name']],
+    ])->assertUnauthorized();
+
+    $denied = User::query()->create(['name' => 'denied']);
+
+    $this->actingAs($denied)->postJson('/api/formforge/v1/forms', [
+        'title' => 'Forbidden',
+        'fields' => [['type' => 'text', 'name' => 'name']],
+    ])->assertForbidden();
+
+    $allowed = User::query()->create(['name' => 'allowed']);
+
+    $this->actingAs($allowed)->postJson('/api/formforge/v1/forms', [
+        'title' => 'Allowed',
+        'fields' => [['type' => 'text', 'name' => 'name']],
+    ])->assertCreated();
+});
+
+it('keeps deleted forms readable through revisions endpoint for admin flows', function (): void {
+    $create = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Delete Flow',
+        'fields' => [
+            ['type' => 'text', 'name' => 'name', 'required' => true],
+        ],
+    ])->assertCreated();
+
+    $key = (string) $create->json('data.key');
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/publish")
+        ->assertOk();
+
+    $this->deleteJson("/api/formforge/v1/forms/{$key}")
+        ->assertOk()
+        ->assertJsonPath('data.key', $key);
+
+    $this->getJson("/api/formforge/v1/forms/{$key}")
+        ->assertNotFound();
+
+    $this->getJson("/api/formforge/v1/forms/{$key}/revisions?include_deleted=1")
+        ->assertOk()
+        ->assertJsonPath('data.key', $key);
+});
+
+it('returns a diff between two form versions', function (): void {
+    $create = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Diff Form',
+        'fields' => [
+            ['type' => 'text', 'name' => 'name', 'required' => true],
+        ],
+    ])->assertCreated();
+
+    $key = (string) $create->json('data.key');
+
+    $this->patchJson("/api/formforge/v1/forms/{$key}", [
+        'fields' => [
+            ['type' => 'text', 'name' => 'name', 'required' => true],
+            ['type' => 'email', 'name' => 'email', 'required' => true],
+        ],
+    ])->assertOk();
+
+    $this->getJson("/api/formforge/v1/forms/{$key}/diff/1/2")
+        ->assertOk()
+        ->assertJsonPath('data.from_version', 1)
+        ->assertJsonPath('data.to_version', 2);
 });
