@@ -42,6 +42,7 @@ class HttpRoutesCommand extends Command
             ['POST', '/' . $prefix . '/forms/{key}/drafts', 'draft', $draft['auth'], $draft['guard'] ?? '-', implode(', ', $draft['middleware'] ?? [])],
             ['GET', '/' . $prefix . '/forms/{key}/drafts/current', 'draft', $draft['auth'], $draft['guard'] ?? '-', implode(', ', $draft['middleware'] ?? [])],
             ['DELETE', '/' . $prefix . '/forms/{key}/drafts/current', 'draft', $draft['auth'], $draft['guard'] ?? '-', implode(', ', $draft['middleware'] ?? [])],
+            ['GET', '/' . $prefix . '/forms', 'management(index)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])],
             ['POST', '/' . $prefix . '/forms', 'management(create)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])],
             ['PATCH', '/' . $prefix . '/forms/{key}', 'management(update)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])],
             ['POST', '/' . $prefix . '/forms/{key}/publish', 'management(publish)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])],

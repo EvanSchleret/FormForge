@@ -47,6 +47,8 @@ class SubmissionValidator
             }
         }
 
+        $payload = $this->sanitizeNullishOptionalPayload($fields, $payload);
+
         $rules = $this->compileRules($fields);
 
         return Validator::make($payload, $rules)->validate();
@@ -101,15 +103,12 @@ class SubmissionValidator
         $rules[$name] = $baseRules;
 
         $required = (bool) ($field['required'] ?? false);
-        $nullable = (bool) ($field['nullable'] ?? false);
         $format = $type === FieldType::DATE_RANGE ? 'date_format:Y-m-d' : 'date';
 
         $leafRules = [];
 
         if ($required) {
             $leafRules[] = 'required';
-        } elseif ($nullable) {
-            $leafRules[] = 'nullable';
         }
 
         $leafRules[] = $format;
@@ -235,7 +234,7 @@ class SubmissionValidator
             if (is_string($rule)) {
                 $candidate = trim($rule);
 
-                if ($candidate !== '') {
+                if ($candidate !== '' && strtolower($candidate) !== 'nullable') {
                     $normalized[] = $candidate;
                 }
 
@@ -246,6 +245,55 @@ class SubmissionValidator
         }
 
         return $normalized;
+    }
+
+    private function sanitizeNullishOptionalPayload(array $fields, array $payload): array
+    {
+        foreach ($fields as $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+
+            $name = (string) ($field['name'] ?? '');
+            $required = (bool) ($field['required'] ?? false);
+
+            if ($name === '' || $required || ! array_key_exists($name, $payload)) {
+                continue;
+            }
+
+            if ($this->isNullishOptionalValue($payload[$name])) {
+                unset($payload[$name]);
+            }
+        }
+
+        return $payload;
+    }
+
+    private function isNullishOptionalValue(mixed $value): bool
+    {
+        if ($value === null) {
+            return true;
+        }
+
+        if (is_string($value)) {
+            return trim($value) === '';
+        }
+
+        if (! is_array($value)) {
+            return false;
+        }
+
+        if ($value === []) {
+            return false;
+        }
+
+        foreach ($value as $item) {
+            if (! $this->isNullishOptionalValue($item)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function extractOptionValues(array $field): array

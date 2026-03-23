@@ -47,6 +47,10 @@ Route::prefix($prefix)
             Route::delete('/forms/{key}/drafts/current', [FormDraftController::class, 'delete']);
         });
 
+        Route::middleware('formforge.endpoint:management,index')->group(static function (): void {
+            Route::get('/forms', [FormManagementController::class, 'index']);
+        });
+
         Route::middleware('formforge.endpoint:management,create')->group(static function (): void {
             Route::post('/forms', [FormManagementController::class, 'create']);
         });

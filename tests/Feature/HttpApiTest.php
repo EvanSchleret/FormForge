@@ -279,6 +279,78 @@ it('creates a form revision through management endpoint', function (): void {
         ->assertJsonPath('data.title', 'Contact Form');
 });
 
+it('lists forms through paginated management endpoint', function (): void {
+    $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Form A',
+        'fields' => [['type' => 'text', 'name' => 'name']],
+        'category' => 'survey',
+    ])->assertCreated();
+
+    $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Form B',
+        'fields' => [['type' => 'email', 'name' => 'email']],
+        'category' => 'contact',
+    ])->assertCreated();
+
+    $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Form C',
+        'fields' => [['type' => 'textarea', 'name' => 'message']],
+        'category' => 'survey',
+    ])->assertCreated();
+
+    $this->getJson('/api/formforge/v1/forms?per_page=2')
+        ->assertOk()
+        ->assertJsonCount(2, 'data.data')
+        ->assertJsonPath('meta.current_page', 1)
+        ->assertJsonPath('meta.per_page', 2)
+        ->assertJsonPath('meta.total', 3)
+        ->assertJsonStructure([
+            'data' => [
+                'data' => [
+                    [
+                        'key',
+                        'title',
+                        'category',
+                        'version_number',
+                        'schema',
+                    ],
+                ],
+            ],
+            'meta' => [
+                'current_page',
+                'from',
+                'last_page',
+                'path',
+                'per_page',
+                'to',
+                'total',
+            ],
+            'links' => [
+                'first',
+                'last',
+                'prev',
+                'next',
+            ],
+        ]);
+});
+
+it('creates a seeded draft form with default page and short_text field when empty', function (): void {
+    $response = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Empty Draft',
+    ]);
+
+    $response
+        ->assertCreated()
+        ->assertJsonPath('data.title', 'Empty Draft')
+        ->assertJsonPath('data.version_number', 1)
+        ->assertJsonPath('data.is_published', false)
+        ->assertJsonCount(1, 'data.schema.fields')
+        ->assertJsonCount(1, 'data.schema.pages')
+        ->assertJsonPath('data.schema.fields.0.type', 'text')
+        ->assertJsonPath('data.schema.fields.0.name', 'short_text')
+        ->assertJsonPath('data.schema.pages.0.fields.0.name', 'short_text');
+});
+
 it('patches a form and creates a new draft revision', function (): void {
     $create = $this->postJson('/api/formforge/v1/forms', [
         'title' => 'Survey V1',
@@ -441,22 +513,16 @@ it('resolves effective schema over HTTP with conditional visibility', function (
             [
                 'page_key' => 'pg_main',
                 'title' => 'Main',
-                'sections' => [
+                'fields' => [
                     [
-                        'section_key' => 'sc_main',
-                        'title' => 'Main',
-                        'fields' => [
-                            [
-                                'field_key' => 'fk_has_company',
-                                'type' => 'checkbox',
-                                'name' => 'has_company',
-                            ],
-                            [
-                                'field_key' => 'fk_company_name',
-                                'type' => 'text',
-                                'name' => 'company_name',
-                            ],
-                        ],
+                        'field_key' => 'fk_has_company',
+                        'type' => 'checkbox',
+                        'name' => 'has_company',
+                    ],
+                    [
+                        'field_key' => 'fk_company_name',
+                        'type' => 'text',
+                        'name' => 'company_name',
                     ],
                 ],
             ],
@@ -493,6 +559,7 @@ it('resolves effective schema over HTTP with conditional visibility', function (
         ->assertOk()
         ->assertJsonPath('data.schema.fields.0.name', 'has_company')
         ->assertJsonCount(1, 'data.schema.fields')
+        ->assertJsonMissingPath('data.schema.pages.0.sections')
         ->assertJsonPath('data.schema.debug.conditions.0.matched', true);
 });
 

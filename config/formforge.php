@@ -184,6 +184,7 @@ return [
             'middleware' => ['throttle:60,1'],
             'ability' => null,
             'abilities' => [
+                'index' => null,
                 'create' => null,
                 'update' => null,
                 'publish' => null,

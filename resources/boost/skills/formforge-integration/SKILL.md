@@ -1,6 +1,6 @@
 ---
 name: formforge-integration
-description: Implement FormForge in Laravel APIs with immutable revisions, conditional pages/sections, strict validation, and secure endpoint configuration.
+description: Implement FormForge in Laravel APIs with immutable revisions, conditional pages, strict validation, and secure endpoint configuration.
 ---
 
 # FormForge Integration Skill
@@ -10,7 +10,7 @@ description: Implement FormForge in Laravel APIs with immutable revisions, condi
 Implement FormForge end-to-end in a Laravel API with:
 
 - deterministic schema and strict validation
-- pages/sections with conditional resolution
+- pages with conditional resolution
 - immutable revision workflow
 - secure management endpoints
 - robust upload strategy (managed/direct/staged)
@@ -30,7 +30,7 @@ Implement FormForge end-to-end in a Laravel API with:
 
 ## Endpoint checklist
 
-- `POST /forms`: create draft with auto-generated key
+- `POST /forms`: create draft with auto-generated UUID key
 - `PATCH /forms/{key}`: create a new draft revision
 - `POST /forms/{key}/publish`: create a published revision
 - `POST /forms/{key}/unpublish`: create a draft revision
@@ -53,7 +53,10 @@ Implement FormForge end-to-end in a Laravel API with:
 ## Validation checklist
 
 - Keep API-provided rules to Laravel string/array format.
-- Enforce title/page/section/field requirements before publish.
+- Apply nullish semantics from `required` only:
+  - optional fields ignore `null` and empty string
+  - required fields reject `null` and empty string
+- Enforce title/page/field requirements before publish.
 - Reject invalid field definitions early.
 
 ## Operational checklist

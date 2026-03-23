@@ -12,6 +12,7 @@ use EvanSchleret\FormForge\Persistence\FormDefinitionRepository;
 use EvanSchleret\FormForge\Support\FormSchemaLayout;
 use EvanSchleret\FormForge\Support\Schema;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -33,9 +34,9 @@ class FormMutationService
         $category = $this->normalizedOptionalString($input['category'] ?? null);
         $api = $this->normalizedArray($input['api'] ?? []);
         $meta = $this->normalizedArray($input['meta'] ?? []);
-        $key = $this->buildGeneratedKey($title);
+        $key = $this->buildGeneratedKey();
         $versionNumber = 1;
-        $formUuid = (string) Str::uuid();
+        $formUuid = $key;
 
         $schema = $this->normalizeSchema(
             key: $key,
@@ -141,7 +142,7 @@ class FormMutationService
         $fields = $currentSchema['fields'] ?? [];
 
         if (! $this->isPublishable($title, $pages, $fields)) {
-            throw new FormForgeException('Form cannot be published: title, at least one page, one section, and one field are required.');
+            throw new FormForgeException('Form cannot be published: title, at least one page, and one field are required.');
         }
 
         $nextVersion = $this->repository->nextVersionNumber($key, true);
@@ -313,6 +314,36 @@ class FormMutationService
         ];
     }
 
+    public function paginateActive(int $perPage = 15, array $filters = []): LengthAwarePaginator
+    {
+        $query = FormDefinition::query()
+            ->where('is_active', true)
+            ->orderByDesc('updated_at')
+            ->orderByDesc('id');
+
+        $category = $this->normalizedOptionalString($filters['category'] ?? null);
+
+        if ($category !== null) {
+            $query->where('category', $category);
+        }
+
+        $published = $this->normalizeOptionalBool($filters['is_published'] ?? null);
+
+        if ($published !== null) {
+            $query->where('is_published', $published);
+        }
+
+        $paginator = $query->paginate($perPage);
+
+        $paginator->setCollection(
+            $paginator->getCollection()
+                ->map(fn (FormDefinition $definition): array => $this->toDetailArray($definition))
+                ->values(),
+        );
+
+        return $paginator;
+    }
+
     public function toDetailArray(FormDefinition $definition): array
     {
         $schema = is_array($definition->schema) ? $definition->schema : [];
@@ -418,6 +449,14 @@ class FormMutationService
             ]);
         }
 
+        if ($pages === [] && $normalizedFields === []) {
+            $normalizedFields = [[
+                'type' => 'text',
+                'name' => 'short_text',
+                'required' => false,
+            ]];
+        }
+
         $schema = [
             'key' => $key,
             'version' => (string) $versionNumber,
@@ -477,37 +516,42 @@ class FormMutationService
                 continue;
             }
 
-            $sections = $this->normalizedArray($page['sections'] ?? []);
-            $resolvedSections = [];
+            $sourceFields = $this->normalizedArray($page['fields'] ?? []);
 
-            foreach ($sections as $section) {
-                if (! is_array($section)) {
+            if ($sourceFields === [] && is_array($page['sections'] ?? null)) {
+                foreach ($this->normalizedArray($page['sections'] ?? []) as $section) {
+                    if (! is_array($section)) {
+                        continue;
+                    }
+
+                    foreach ($this->normalizedArray($section['fields'] ?? []) as $fieldRaw) {
+                        if (is_array($fieldRaw)) {
+                            $sourceFields[] = $fieldRaw;
+                        }
+                    }
+                }
+            }
+
+            $resolvedFields = [];
+
+            foreach ($sourceFields as $fieldRaw) {
+                if (! is_array($fieldRaw)) {
                     continue;
                 }
 
-                $resolvedFields = [];
+                $name = trim((string) ($fieldRaw['name'] ?? ''));
+                $fieldKey = trim((string) ($fieldRaw['field_key'] ?? ''));
+                $normalizedField = $byFieldKey[$fieldKey] ?? ($byName[$name] ?? null);
 
-                foreach ($this->normalizedArray($section['fields'] ?? []) as $fieldRaw) {
-                    if (! is_array($fieldRaw)) {
-                        continue;
-                    }
-
-                    $name = trim((string) ($fieldRaw['name'] ?? ''));
-                    $fieldKey = trim((string) ($fieldRaw['field_key'] ?? ''));
-                    $normalizedField = $byFieldKey[$fieldKey] ?? ($byName[$name] ?? null);
-
-                    if (! is_array($normalizedField)) {
-                        continue;
-                    }
-
-                    $resolvedFields[] = array_merge($fieldRaw, $normalizedField);
+                if (! is_array($normalizedField)) {
+                    continue;
                 }
 
-                $section['fields'] = $resolvedFields;
-                $resolvedSections[] = $section;
+                $resolvedFields[] = array_merge($fieldRaw, $normalizedField);
             }
 
-            $page['sections'] = $resolvedSections;
+            $page['fields'] = $resolvedFields;
+            unset($page['sections']);
             $resolved[] = $page;
         }
 
@@ -528,51 +572,29 @@ class FormMutationService
             return false;
         }
 
-        $hasSection = false;
+        $hasFieldInPage = false;
 
         foreach ($pages as $page) {
             if (! is_array($page)) {
                 continue;
             }
 
-            $sections = $page['sections'] ?? [];
+            $pageFields = $page['fields'] ?? [];
 
-            if (! is_array($sections) || $sections === []) {
-                continue;
-            }
-
-            foreach ($sections as $section) {
-                if (! is_array($section)) {
-                    continue;
-                }
-
-                $sectionFields = $section['fields'] ?? [];
-
-                if (is_array($sectionFields) && $sectionFields !== []) {
-                    $hasSection = true;
-                    break 2;
-                }
+            if (is_array($pageFields) && $pageFields !== []) {
+                $hasFieldInPage = true;
+                break;
             }
         }
 
-        return $hasSection;
+        return $hasFieldInPage;
     }
 
-    private function buildGeneratedKey(string $title): string
+    private function buildGeneratedKey(): string
     {
-        $base = Str::slug($title, '-');
-
-        if ($base === '') {
-            $base = 'form';
-        }
-
-        $candidate = $base;
-        $suffix = 2;
-
-        while ($this->repository->keyExists($candidate, true)) {
-            $candidate = $base . '-' . $suffix;
-            $suffix++;
-        }
+        do {
+            $candidate = (string) Str::uuid();
+        } while ($this->repository->keyExists($candidate, true));
 
         return $candidate;
     }
@@ -602,6 +624,33 @@ class FormMutationService
         $value = trim($value);
 
         return $value === '' ? null : $value;
+    }
+
+    private function normalizeOptionalBool(mixed $value): ?bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_int($value) || is_float($value)) {
+            return (float) $value !== 0.0;
+        }
+
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $normalized = strtolower(trim($value));
+
+        if (in_array($normalized, ['1', 'true', 'yes', 'on'], true)) {
+            return true;
+        }
+
+        if (in_array($normalized, ['0', 'false', 'no', 'off'], true)) {
+            return false;
+        }
+
+        return null;
     }
 
     private function toSummaryArray(FormDefinition $definition): array

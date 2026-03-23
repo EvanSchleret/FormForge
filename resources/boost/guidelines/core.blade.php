@@ -6,7 +6,7 @@ Use these rules when implementing or extending FormForge integrations in Laravel
 
 - Keep form schemas deterministic and immutable by revision.
 - Treat `key` as a stable public identifier.
-- Build forms with `pages[].sections[].fields[]` as canonical layout.
+- Build forms with `pages[].fields[]` as canonical layout.
 - Keep conditional behavior server-resolved and server-validated.
 - Create new revisions for changes (`PATCH`, `publish`, `unpublish`), never mutate an existing revision.
 - Keep management operations idempotent when `Idempotency-Key` is provided.
@@ -40,10 +40,12 @@ Use these rules when implementing or extending FormForge integrations in Laravel
 
 - Use string/array Laravel rules in API payloads.
 - Do not rely on runtime closures or object rules from API payloads.
+- Treat nullish semantics from `required` only:
+  - `required: false` ignores `null` and empty string
+  - `required: true` rejects `null` and empty string
 - Enforce publishability constraints before publishing:
   - non-empty title
   - at least one page
-  - at least one section
   - at least one field
 
 ## Revision strategy

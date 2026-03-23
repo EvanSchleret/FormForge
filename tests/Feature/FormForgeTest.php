@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use EvanSchleret\FormForge\Exceptions\ImmutableVersionException;
-use EvanSchleret\FormForge\Exceptions\InvalidFieldDefinitionException;
 use EvanSchleret\FormForge\Exceptions\UnknownFieldsException;
 use EvanSchleret\FormForge\Facades\Form;
 use EvanSchleret\FormForge\FormManager;
@@ -39,13 +38,41 @@ it('exports a deterministic schema and keeps generated field_key stable across v
     expect($schemaV1['fields'][0]['field_key'])->toBe($schemaV2['fields'][0]['field_key']);
 });
 
-it('rejects required and nullable on the same field', function (): void {
-    $key = 'conflict_' . Str::lower(Str::random(8));
+it('treats nullish values as absent for optional fields', function (): void {
+    $key = 'nullish_optional_' . Str::lower(Str::random(8));
 
-    Form::define($key)->version('1')->text('name')->required();
+    Form::define($key)
+        ->version('1')
+        ->text('name')
+        ->email('email')
+        ->dateRange('vacation');
 
-    expect(static fn () => Form::define($key . '_2')->version('1')->text('name')->required()->nullable())
-        ->toThrow(InvalidFieldDefinitionException::class);
+    $submission = Form::get($key, '1')->submit([
+        'name' => '',
+        'email' => null,
+        'vacation' => [
+            'start' => null,
+            'end' => '',
+        ],
+    ]);
+
+    expect($submission->payload)->toBe([]);
+});
+
+it('rejects nullish values when field is required', function (): void {
+    $key = 'nullish_required_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')->required();
+
+    expect(static fn () => Form::get($key, '1')->submit([
+        'name' => null,
+    ]))->toThrow(\Illuminate\Validation\ValidationException::class);
+
+    expect(static fn () => Form::get($key, '1')->submit([
+        'name' => '',
+    ]))->toThrow(\Illuminate\Validation\ValidationException::class);
 });
 
 it('syncs runtime definitions idempotently and enforces immutability', function (): void {

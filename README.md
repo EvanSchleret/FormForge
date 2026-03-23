@@ -22,7 +22,7 @@
 FormForge gives you one backend source of truth for:
 
 - form schema with deterministic keys
-- pages, sections, and conditional visibility rules
+- pages and conditional visibility rules
 - immutable revision history (`create`, `patch`, `publish`, `unpublish`)
 - strict payload validation on effective (condition-resolved) schema
 - configurable endpoint security (`auth`, `guard`, `middleware`, `ability`)
@@ -95,17 +95,17 @@ Every normalized schema contains:
 
 - `key`, `version`, `title`
 - flattened `fields`
-- `pages[].sections[].fields[]`
+- `pages[].fields[]`
 - `conditions[]`
 - `drafts.enabled`
 
-When only `fields` are provided, FormForge auto-wraps them into a default page/section.
+When only `fields` are provided, FormForge auto-wraps them into a default page.
 
 ### Conditional rules
 
 Conditions support:
 
-- `target_type`: `page|section|field`
+- `target_type`: `page|field`
 - `action`: `show|hide|skip|require|disable`
 - `match`: `all|any`
 - operators: `eq`, `neq`, `in`, `not_in`, `gt`, `gte`, `lt`, `lte`, `contains`, `not_contains`, `is_empty`, `not_empty`
@@ -155,7 +155,8 @@ Draft behavior:
 
 ### Management endpoints
 
-- `POST /forms` (create revision 1, key auto-generated if absent)
+- `GET /forms` (paginated list of active forms, payload in `data.data`)
+- `POST /forms` (create revision 1, UUID key auto-generated)
 - `PATCH /forms/{key}` (creates a new draft revision)
 - `POST /forms/{key}/publish` (creates a new published revision)
 - `POST /forms/{key}/unpublish` (creates a new draft revision)
@@ -163,13 +164,19 @@ Draft behavior:
 - `GET /forms/{key}/revisions` (`include_deleted=1` supported)
 - `GET /forms/{key}/diff/{fromVersion}/{toVersion}`
 
+Creation rule:
+
+- `POST /forms` requires only `title`
+- if both `fields` and `pages` are omitted (or empty), FormForge seeds:
+  - one default page
+  - one default field (`type: text`, `name: short_text`)
+
 ## Publishability
 
 A form can be published only when:
 
 - `title` is non-empty
 - at least one page exists
-- at least one section exists
 - at least one field exists
 
 ## Endpoint security model
@@ -199,6 +206,7 @@ Example:
         'guard' => 'sanctum',
         'abilities' => [
             'create' => 'formforge.create',
+            'index' => 'formforge.index',
             'update' => 'formforge.update',
             'publish' => 'formforge.publish',
             'unpublish' => 'formforge.unpublish',
@@ -227,6 +235,9 @@ Validation is Laravel-native:
 - `rules(...)` appends custom rules
 - `replaceRules(...)` fully overrides generated rules
 - API payload rules are string/array Laravel rules
+- nullish handling is driven by `required`:
+  - `required: false` => `null` and empty string are treated as absent
+  - `required: true` => `null` and empty string are rejected
 
 Reference: [Laravel validation rules](https://laravel.com/docs/validation#available-validation-rules)
 
@@ -290,7 +301,7 @@ Use them to guide AI agents implementing FormForge in Laravel APIs.
 - [ ] Add OpenAPI export command for FormForge HTTP contracts
 - [ ] Add policy scaffold command for management/draft abilities
 - [ ] Add revision migration tooling (dry-run + apply) for schema evolution
-- [ ] Add full FormForge sections/pages analytics helpers
+- [ ] Add full FormForge page analytics helpers
 - [ ] Add first-party Laravel Boost template pack for FormForge + auth presets
 
 ## Other packages

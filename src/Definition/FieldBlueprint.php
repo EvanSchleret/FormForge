@@ -21,8 +21,6 @@ class FieldBlueprint
 
     private bool $required = false;
 
-    private bool $nullable = false;
-
     private mixed $default = null;
 
     private ?string $placeholder = null;
@@ -46,8 +44,6 @@ class FieldBlueprint
     private bool $multiple = false;
 
     private bool $disabled = false;
-
-    private bool $readonly = false;
 
     private array $accept = [];
 
@@ -87,7 +83,6 @@ class FieldBlueprint
         $field->fieldKey = isset($schema['field_key']) ? trim((string) $schema['field_key']) : null;
         $field->label = isset($schema['label']) ? trim((string) $schema['label']) : null;
         $field->required = (bool) ($schema['required'] ?? false);
-        $field->nullable = (bool) ($schema['nullable'] ?? false);
         $field->default = $schema['default'] ?? null;
         $field->placeholder = isset($schema['placeholder']) ? (string) $schema['placeholder'] : null;
         $field->helpText = isset($schema['help_text']) ? (string) $schema['help_text'] : null;
@@ -99,7 +94,6 @@ class FieldBlueprint
         $field->options = is_array($schema['options'] ?? null) ? $field->normalizeOptions($schema['options']) : [];
         $field->multiple = (bool) ($schema['multiple'] ?? false);
         $field->disabled = (bool) ($schema['disabled'] ?? false);
-        $field->readonly = (bool) ($schema['readonly'] ?? false);
         $field->accept = array_values(array_filter(array_map('strval', (array) ($schema['accept'] ?? [])), static fn (string $value): bool => trim($value) !== ''));
         $field->maxSize = isset($schema['max_size']) ? (int) $schema['max_size'] : null;
         $field->maxFiles = isset($schema['max_files']) ? (int) $schema['max_files'] : null;
@@ -167,22 +161,7 @@ class FieldBlueprint
 
     public function required(bool $required = true): self
     {
-        if ($required && $this->nullable) {
-            throw new InvalidFieldDefinitionException("Field [{$this->name}] cannot be required and nullable at the same time.");
-        }
-
         $this->required = $required;
-
-        return $this;
-    }
-
-    public function nullable(bool $nullable = true): self
-    {
-        if ($nullable && $this->required) {
-            throw new InvalidFieldDefinitionException("Field [{$this->name}] cannot be nullable and required at the same time.");
-        }
-
-        $this->nullable = $nullable;
 
         return $this;
     }
@@ -291,13 +270,6 @@ class FieldBlueprint
         return $this;
     }
 
-    public function readonly(bool $readonly = true): self
-    {
-        $this->readonly = $readonly;
-
-        return $this;
-    }
-
     public function accept(string|array $accept): self
     {
         $values = is_array($accept) ? $accept : [$accept];
@@ -382,11 +354,6 @@ class FieldBlueprint
         return $this->required;
     }
 
-    public function isNullable(): bool
-    {
-        return $this->nullable;
-    }
-
     public function defaultValue(): mixed
     {
         return $this->default;
@@ -455,7 +422,6 @@ class FieldBlueprint
             'name' => $this->name,
             'label' => $this->label ?? ucfirst(str_replace('_', ' ', $this->name)),
             'required' => $this->required,
-            'nullable' => $this->nullable,
             'default' => $this->default,
             'rules' => $this->resolveRules(),
             'meta' => $this->meta,
@@ -487,10 +453,6 @@ class FieldBlueprint
 
         if ($this->disabled) {
             $schema['disabled'] = true;
-        }
-
-        if ($this->readonly) {
-            $schema['readonly'] = true;
         }
 
         if ($this->options !== []) {
@@ -650,10 +612,6 @@ class FieldBlueprint
 
         if ($this->required) {
             $rules[] = 'required';
-        }
-
-        if ($this->nullable) {
-            $rules[] = 'nullable';
         }
 
         switch ($this->type) {

@@ -17,6 +17,39 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class FormManagementController
 {
+    public function index(Request $request, FormMutationService $mutations): JsonResponse
+    {
+        $perPage = $this->boundedInt($request->query('per_page', 15), 1, 100, 15);
+        $filters = [
+            'category' => is_string($request->query('category')) ? trim((string) $request->query('category')) : null,
+            'is_published' => $request->query('is_published'),
+        ];
+
+        $paginator = $mutations->paginateActive($perPage, $filters);
+        $paginator->appends($request->query());
+
+        return response()->json([
+            'data' => [
+                'data' => $paginator->items(),
+            ],
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'from' => $paginator->firstItem(),
+                'last_page' => $paginator->lastPage(),
+                'path' => $paginator->path(),
+                'per_page' => $paginator->perPage(),
+                'to' => $paginator->lastItem(),
+                'total' => $paginator->total(),
+            ],
+            'links' => [
+                'first' => $paginator->url(1),
+                'last' => $paginator->url($paginator->lastPage()),
+                'prev' => $paginator->previousPageUrl(),
+                'next' => $paginator->nextPageUrl(),
+            ],
+        ]);
+    }
+
     public function create(Request $request, FormMutationService $mutations, IdempotencyService $idempotency): JsonResponse
     {
         $payload = $request->all();
@@ -271,5 +304,26 @@ class FormManagementController
         $normalized = strtolower(trim($value));
 
         return in_array($normalized, ['1', 'true', 'yes', 'on'], true);
+    }
+
+    private function boundedInt(mixed $value, int $min, int $max, int $default): int
+    {
+        if (is_int($value)) {
+            $candidate = $value;
+        } elseif (is_numeric($value)) {
+            $candidate = (int) $value;
+        } else {
+            return $default;
+        }
+
+        if ($candidate < $min) {
+            return $min;
+        }
+
+        if ($candidate > $max) {
+            return $max;
+        }
+
+        return $candidate;
     }
 }

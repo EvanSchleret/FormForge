@@ -4,17 +4,14 @@ on:
   push:
     branches:
       - main
-      - develop
-      - "feat/**"
   pull_request:
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   tests:
-    name: PHP ${{ matrix.php }} · Laravel ${{ matrix.laravel }} · Testbench ${{ matrix.testbench }} · ${{ matrix.dependency-version }}
+    name: PHP ${{ matrix.php }} / Laravel ${{ matrix.laravel }}
     runs-on: ubuntu-latest
 
     strategy:
@@ -22,47 +19,20 @@ jobs:
       matrix:
         include:
           - php: "8.2"
-            laravel: "12.*"
+            laravel: "12"
             testbench: "^10.0"
-            dependency-version: "prefer-stable"
-            pest: "^3.8"
-            pest-plugin-laravel: "^3.2"
-            phpunit: "^11.5"
-          - php: "8.2"
-            laravel: "12.*"
-            testbench: "^10.0"
-            dependency-version: "prefer-lowest"
-            pest: "^3.8"
-            pest-plugin-laravel: "^3.2"
-            phpunit: "^11.5"
+            pest: "^3.0"
+            pest_plugin: "^3.0"
           - php: "8.3"
-            laravel: "12.*"
+            laravel: "12"
             testbench: "^10.0"
-            dependency-version: "prefer-stable"
-            pest: "^3.8"
-            pest-plugin-laravel: "^3.2"
-            phpunit: "^11.5"
-          - php: "8.4"
-            laravel: "12.*"
-            testbench: "^10.0"
-            dependency-version: "prefer-stable"
-            pest: "^3.8"
-            pest-plugin-laravel: "^3.2"
-            phpunit: "^11.5"
+            pest: "^3.0"
+            pest_plugin: "^3.0"
           - php: "8.3"
-            laravel: "13.*"
+            laravel: "13"
             testbench: "^11.0"
-            dependency-version: "prefer-stable"
-            pest: "^4.4"
-            pest-plugin-laravel: "^4.1"
-            phpunit: "^12.0"
-          - php: "8.4"
-            laravel: "13.*"
-            testbench: "^11.0"
-            dependency-version: "prefer-stable"
-            pest: "^4.4"
-            pest-plugin-laravel: "^4.1"
-            phpunit: "^12.0"
+            pest: "^4.0"
+            pest_plugin: "^4.0"
 
     steps:
       - name: Checkout
@@ -72,29 +42,22 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          tools: composer:v2
           coverage: none
+          tools: composer:v2
           extensions: dom, json, mbstring, pdo_sqlite, sqlite3
-
-      - name: Configure Laravel/Testbench constraints
-        run: |
-          composer require --no-interaction --no-update \
-            "illuminate/console:${{ matrix.laravel }}" \
-            "illuminate/database:${{ matrix.laravel }}" \
-            "illuminate/filesystem:${{ matrix.laravel }}" \
-            "illuminate/http:${{ matrix.laravel }}" \
-            "illuminate/support:${{ matrix.laravel }}" \
-            "illuminate/validation:${{ matrix.laravel }}" \
-            "orchestra/testbench:${{ matrix.testbench }}" \
-            "pestphp/pest:${{ matrix.pest }}" \
-            "pestphp/pest-plugin-laravel:${{ matrix.pest-plugin-laravel }}" \
-            "phpunit/phpunit:${{ matrix.phpunit }}"
-
-      - name: Install dependencies
-        run: composer update --${{ matrix.dependency-version }} --prefer-dist --with-all-dependencies --no-interaction --no-progress
 
       - name: Validate composer.json
         run: composer validate --strict
 
+      - name: Configure matrix dependency stack
+        run: |
+          composer require --dev --no-interaction --no-update \
+            "orchestra/testbench:${{ matrix.testbench }}" \
+            "pestphp/pest:${{ matrix.pest }}" \
+            "pestphp/pest-plugin-laravel:${{ matrix.pest_plugin }}"
+
+      - name: Install dependencies
+        run: composer update --prefer-dist --no-interaction --no-progress
+
       - name: Run tests
-        run: vendor/bin/pest --colors=never
+        run: composer test

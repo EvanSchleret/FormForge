@@ -9,7 +9,6 @@ use EvanSchleret\FormForge\Exceptions\InvalidFieldDefinitionException;
 final class FormSchemaLayout
 {
     public const TARGET_PAGE = 'page';
-    public const TARGET_SECTION = 'section';
     public const TARGET_FIELD = 'field';
 
     public const ACTION_SHOW = 'show';
@@ -40,19 +39,19 @@ final class FormSchemaLayout
         $version = trim((string) ($schema['version'] ?? ''));
         $title = trim((string) ($schema['title'] ?? $key));
 
-        $pagesInput = $schema['pages'] ?? null;
-        $fieldsInput = $schema['fields'] ?? null;
-
-        $pagesRaw = self::normalizePagesInput($pagesInput, $fieldsInput, $title, $key, $version);
+        $pagesRaw = self::normalizePagesInput(
+            pages: $schema['pages'] ?? null,
+            fields: $schema['fields'] ?? null,
+            title: $title,
+            key: $key,
+            version: $version,
+        );
 
         $pageKeys = [];
-        $sectionKeys = [];
         $fieldNames = [];
         $fieldKeys = [];
-        $fieldSectionMap = [];
         $fieldPageMap = [];
         $fieldNameToKey = [];
-
         $pages = [];
 
         foreach ($pagesRaw as $pageIndex => $pageRaw) {
@@ -74,110 +73,58 @@ final class FormSchemaLayout
                 $pageTitle = 'Page ' . ($pageIndex + 1);
             }
 
-            $sectionsInput = $pageRaw['sections'] ?? [];
+            $fieldsRaw = self::normalizePageFieldsInput($pageRaw);
+            $fields = [];
 
-            if (! is_array($sectionsInput)) {
-                throw new InvalidFieldDefinitionException("Page [{$pageKey}] sections must be an array.");
-            }
-
-            if ($sectionsInput === [] && isset($pageRaw['fields']) && is_array($pageRaw['fields'])) {
-                $sectionsInput = [[
-                    'section_key' => "sc_{$pageIndex}_0_{$key}",
-                    'title' => $pageTitle,
-                    'fields' => $pageRaw['fields'],
-                ]];
-            }
-
-            $sections = [];
-
-            foreach ($sectionsInput as $sectionIndex => $sectionRaw) {
-                if (! is_array($sectionRaw)) {
-                    throw new InvalidFieldDefinitionException("Page [{$pageKey}] has an invalid section entry.");
+            foreach ($fieldsRaw as $fieldIndex => $fieldRaw) {
+                if (! is_array($fieldRaw)) {
+                    throw new InvalidFieldDefinitionException("Page [{$pageKey}] contains an invalid field entry.");
                 }
 
-                $sectionKey = self::normalizeKeyValue($sectionRaw['section_key'] ?? null, "sc_{$pageIndex}_{$sectionIndex}_{$key}");
+                $name = trim((string) ($fieldRaw['name'] ?? ''));
+                $type = trim((string) ($fieldRaw['type'] ?? ''));
 
-                if (in_array($sectionKey, $sectionKeys, true)) {
-                    throw new InvalidFieldDefinitionException("Duplicate section_key [{$sectionKey}].");
+                if ($name === '' || $type === '') {
+                    throw new InvalidFieldDefinitionException("Page [{$pageKey}] fields must contain name and type.");
                 }
 
-                $sectionKeys[] = $sectionKey;
-
-                $sectionTitle = trim((string) ($sectionRaw['title'] ?? ''));
-
-                if ($sectionTitle === '') {
-                    $sectionTitle = 'Section ' . ($sectionIndex + 1);
+                if (in_array($name, $fieldNames, true)) {
+                    throw new InvalidFieldDefinitionException("Duplicate field name [{$name}] in schema.");
                 }
 
-                $fieldsRaw = $sectionRaw['fields'] ?? [];
+                $fieldNames[] = $name;
+                $fieldKeyDefault = self::defaultFieldKey($key, $name, $fieldIndex);
+                $fieldKey = self::normalizeKeyValue($fieldRaw['field_key'] ?? null, $fieldKeyDefault);
 
-                if (! is_array($fieldsRaw)) {
-                    throw new InvalidFieldDefinitionException("Section [{$sectionKey}] fields must be an array.");
+                if (in_array($fieldKey, $fieldKeys, true)) {
+                    throw new InvalidFieldDefinitionException("Duplicate field_key [{$fieldKey}] in schema.");
                 }
 
-                $fields = [];
+                $fieldKeys[] = $fieldKey;
+                $fieldPageMap[$fieldKey] = $pageKey;
+                $fieldNameToKey[$name] = $fieldKey;
 
-                foreach ($fieldsRaw as $fieldIndex => $fieldRaw) {
-                    if (! is_array($fieldRaw)) {
-                        throw new InvalidFieldDefinitionException("Section [{$sectionKey}] contains an invalid field entry.");
-                    }
+                $field = $fieldRaw;
+                $field['field_key'] = $fieldKey;
+                $field['page_key'] = $pageKey;
+                unset($field['section_key']);
+                $field['required'] = (bool) ($fieldRaw['required'] ?? false);
+                $field['disabled'] = (bool) ($fieldRaw['disabled'] ?? false);
+                unset($field['nullable'], $field['readonly']);
 
-                    $name = trim((string) ($fieldRaw['name'] ?? ''));
-                    $type = trim((string) ($fieldRaw['type'] ?? ''));
-
-                    if ($name === '' || $type === '') {
-                        throw new InvalidFieldDefinitionException("Section [{$sectionKey}] fields must contain name and type.");
-                    }
-
-                    if (in_array($name, $fieldNames, true)) {
-                        throw new InvalidFieldDefinitionException("Duplicate field name [{$name}] in schema.");
-                    }
-
-                    $fieldNames[] = $name;
-
-                    $fieldKeyDefault = self::defaultFieldKey($key, $name, $fieldIndex);
-                    $fieldKey = self::normalizeKeyValue($fieldRaw['field_key'] ?? null, $fieldKeyDefault);
-
-                    if (in_array($fieldKey, $fieldKeys, true)) {
-                        throw new InvalidFieldDefinitionException("Duplicate field_key [{$fieldKey}] in schema.");
-                    }
-
-                    $fieldKeys[] = $fieldKey;
-                    $fieldSectionMap[$fieldKey] = $sectionKey;
-                    $fieldPageMap[$fieldKey] = $pageKey;
-                    $fieldNameToKey[$name] = $fieldKey;
-
-                    $field = $fieldRaw;
-                    $field['field_key'] = $fieldKey;
-                    $field['page_key'] = $pageKey;
-                    $field['section_key'] = $sectionKey;
-                    $field['required'] = (bool) ($fieldRaw['required'] ?? false);
-                    $field['nullable'] = (bool) ($fieldRaw['nullable'] ?? false);
-                    $field['disabled'] = (bool) ($fieldRaw['disabled'] ?? false);
-                    $field['readonly'] = (bool) ($fieldRaw['readonly'] ?? false);
-
-                    if (! isset($field['label']) || trim((string) $field['label']) === '') {
-                        $field['label'] = ucfirst(str_replace('_', ' ', $name));
-                    }
-
-                    if (! isset($field['meta']) || ! is_array($field['meta'])) {
-                        $field['meta'] = [];
-                    }
-
-                    if (! isset($field['rules']) || ! is_array($field['rules'])) {
-                        $field['rules'] = [];
-                    }
-
-                    $fields[] = $field;
+                if (! isset($field['label']) || trim((string) $field['label']) === '') {
+                    $field['label'] = ucfirst(str_replace('_', ' ', $name));
                 }
 
-                $sections[] = [
-                    'section_key' => $sectionKey,
-                    'title' => $sectionTitle,
-                    'description' => self::normalizeOptionalString($sectionRaw['description'] ?? null),
-                    'meta' => is_array($sectionRaw['meta'] ?? null) ? $sectionRaw['meta'] : [],
-                    'fields' => $fields,
-                ];
+                if (! isset($field['meta']) || ! is_array($field['meta'])) {
+                    $field['meta'] = [];
+                }
+
+                if (! isset($field['rules']) || ! is_array($field['rules'])) {
+                    $field['rules'] = [];
+                }
+
+                $fields[] = $field;
             }
 
             $pages[] = [
@@ -185,7 +132,7 @@ final class FormSchemaLayout
                 'title' => $pageTitle,
                 'description' => self::normalizeOptionalString($pageRaw['description'] ?? null),
                 'meta' => is_array($pageRaw['meta'] ?? null) ? $pageRaw['meta'] : [],
-                'sections' => $sections,
+                'fields' => $fields,
             ];
         }
 
@@ -194,9 +141,7 @@ final class FormSchemaLayout
         $conditions = self::normalizeConditions(
             conditions: $schema['conditions'] ?? [],
             pageKeys: $pageKeys,
-            sectionKeys: $sectionKeys,
             fieldKeys: $fieldKeys,
-            fieldSectionMap: $fieldSectionMap,
             fieldPageMap: $fieldPageMap,
             fieldNameToKey: $fieldNameToKey,
         );
@@ -219,15 +164,12 @@ final class FormSchemaLayout
 
         $pageVisible = [];
         $pageHiddenHard = [];
-        $sectionVisible = [];
-        $sectionHiddenHard = [];
         $fieldVisible = [];
         $fieldHiddenHard = [];
         $fieldRequired = [];
         $fieldDisabled = [];
         $fieldNameByKey = [];
         $fieldsByPage = [];
-        $fieldsBySection = [];
 
         foreach ($pages as $page) {
             if (! is_array($page)) {
@@ -244,53 +186,24 @@ final class FormSchemaLayout
             $pageHiddenHard[$pageKey] = false;
             $fieldsByPage[$pageKey] = [];
 
-            $sections = $page['sections'] ?? [];
-
-            if (! is_array($sections)) {
-                continue;
-            }
-
-            foreach ($sections as $section) {
-                if (! is_array($section)) {
+            foreach ((array) ($page['fields'] ?? []) as $field) {
+                if (! is_array($field)) {
                     continue;
                 }
 
-                $sectionKey = (string) ($section['section_key'] ?? '');
+                $fieldKey = (string) ($field['field_key'] ?? '');
+                $fieldName = (string) ($field['name'] ?? '');
 
-                if ($sectionKey === '') {
+                if ($fieldKey === '' || $fieldName === '') {
                     continue;
                 }
 
-                $sectionVisible[$sectionKey] = true;
-                $sectionHiddenHard[$sectionKey] = false;
-                $fieldsBySection[$sectionKey] = [];
-
-                $fields = $section['fields'] ?? [];
-
-                if (! is_array($fields)) {
-                    continue;
-                }
-
-                foreach ($fields as $field) {
-                    if (! is_array($field)) {
-                        continue;
-                    }
-
-                    $fieldKey = (string) ($field['field_key'] ?? '');
-                    $fieldName = (string) ($field['name'] ?? '');
-
-                    if ($fieldKey === '' || $fieldName === '') {
-                        continue;
-                    }
-
-                    $fieldVisible[$fieldKey] = true;
-                    $fieldHiddenHard[$fieldKey] = false;
-                    $fieldRequired[$fieldKey] = (bool) ($field['required'] ?? false);
-                    $fieldDisabled[$fieldKey] = (bool) ($field['disabled'] ?? false);
-                    $fieldNameByKey[$fieldKey] = $fieldName;
-                    $fieldsByPage[$pageKey][] = $fieldKey;
-                    $fieldsBySection[$sectionKey][] = $fieldKey;
-                }
+                $fieldsByPage[$pageKey][] = $fieldKey;
+                $fieldNameByKey[$fieldKey] = $fieldName;
+                $fieldVisible[$fieldKey] = true;
+                $fieldHiddenHard[$fieldKey] = false;
+                $fieldRequired[$fieldKey] = (bool) ($field['required'] ?? false);
+                $fieldDisabled[$fieldKey] = (bool) ($field['disabled'] ?? false);
             }
         }
 
@@ -307,7 +220,7 @@ final class FormSchemaLayout
             $matchMode = (string) ($condition['match'] ?? self::MATCH_ALL);
             $clauses = $condition['when'] ?? [];
 
-            if ($targetType === '' || $targetKey === '' || $action === '' || ! is_array($clauses)) {
+            if (! is_array($clauses) || $clauses === []) {
                 continue;
             }
 
@@ -322,9 +235,14 @@ final class FormSchemaLayout
                 $operator = (string) ($clause['operator'] ?? self::OP_EQ);
                 $expected = $clause['value'] ?? null;
                 $fieldName = $fieldNameByKey[$fieldKey] ?? null;
-                $actual = $fieldName === null ? null : ($payload[$fieldName] ?? null);
+                $actual = $fieldName !== null ? ($payload[$fieldName] ?? null) : null;
+                $result = self::evaluate($actual, $operator, $expected);
 
-                $evaluations[] = self::evaluate($actual, $operator, $expected);
+                $evaluations[] = $result;
+            }
+
+            if ($evaluations === []) {
+                continue;
             }
 
             $matched = $matchMode === self::MATCH_ANY
@@ -338,6 +256,7 @@ final class FormSchemaLayout
                     'target_key' => $targetKey,
                     'action' => $action,
                     'matched' => $matched,
+                    'evaluations' => $evaluations,
                 ];
             }
 
@@ -351,14 +270,11 @@ final class FormSchemaLayout
                 action: $action,
                 pageVisible: $pageVisible,
                 pageHiddenHard: $pageHiddenHard,
-                sectionVisible: $sectionVisible,
-                sectionHiddenHard: $sectionHiddenHard,
                 fieldVisible: $fieldVisible,
                 fieldHiddenHard: $fieldHiddenHard,
                 fieldRequired: $fieldRequired,
                 fieldDisabled: $fieldDisabled,
                 fieldsByPage: $fieldsByPage,
-                fieldsBySection: $fieldsBySection,
             );
         }
 
@@ -375,52 +291,27 @@ final class FormSchemaLayout
                 continue;
             }
 
-            $effectiveSections = [];
+            $effectiveFields = [];
 
-            foreach ((array) ($page['sections'] ?? []) as $section) {
-                if (! is_array($section)) {
+            foreach ((array) ($page['fields'] ?? []) as $field) {
+                if (! is_array($field)) {
                     continue;
                 }
 
-                $sectionKey = (string) ($section['section_key'] ?? '');
+                $fieldKey = (string) ($field['field_key'] ?? '');
 
-                if ($sectionKey === '' || ! ($sectionVisible[$sectionKey] ?? false)) {
+                if ($fieldKey === '' || ! ($fieldVisible[$fieldKey] ?? false)) {
                     continue;
                 }
 
-                $effectiveFields = [];
-
-                foreach ((array) ($section['fields'] ?? []) as $field) {
-                    if (! is_array($field)) {
-                        continue;
-                    }
-
-                    $fieldKey = (string) ($field['field_key'] ?? '');
-
-                    if ($fieldKey === '' || ! ($fieldVisible[$fieldKey] ?? false)) {
-                        continue;
-                    }
-
-                    $field['required'] = (bool) ($fieldRequired[$fieldKey] ?? $field['required'] ?? false);
-                    $field['disabled'] = (bool) ($fieldDisabled[$fieldKey] ?? $field['disabled'] ?? false);
-                    $effectiveFields[] = $field;
-                }
-
-                if ($effectiveFields === []) {
-                    continue;
-                }
-
-                $effectiveSection = $section;
-                $effectiveSection['fields'] = $effectiveFields;
-                $effectiveSections[] = $effectiveSection;
-            }
-
-            if ($effectiveSections === []) {
-                continue;
+                $effectiveField = $field;
+                $effectiveField['required'] = (bool) ($fieldRequired[$fieldKey] ?? false);
+                $effectiveField['disabled'] = (bool) ($fieldDisabled[$fieldKey] ?? false);
+                $effectiveFields[] = $effectiveField;
             }
 
             $effectivePage = $page;
-            $effectivePage['sections'] = $effectiveSections;
+            $effectivePage['fields'] = $effectiveFields;
             $effectivePages[] = $effectivePage;
         }
 
@@ -433,7 +324,6 @@ final class FormSchemaLayout
                 'conditions' => $conditionDebug,
                 'visible' => [
                     'pages' => array_values(array_keys(array_filter($pageVisible, static fn (bool $state): bool => $state))),
-                    'sections' => array_values(array_keys(array_filter($sectionVisible, static fn (bool $state): bool => $state))),
                     'fields' => array_values(array_keys(array_filter($fieldVisible, static fn (bool $state): bool => $state))),
                 ],
             ];
@@ -457,26 +347,54 @@ final class FormSchemaLayout
             return [];
         }
 
-        $pageKey = self::defaultPageKey($key, $version);
-        $sectionKey = self::defaultSectionKey($key, $version);
-
         return [[
-            'page_key' => $pageKey,
+            'page_key' => self::defaultPageKey($key, $version),
             'title' => $title,
-            'sections' => [[
-                'section_key' => $sectionKey,
-                'title' => $title,
-                'fields' => $fields,
-            ]],
+            'fields' => $fields,
         ]];
+    }
+
+    private static function normalizePageFieldsInput(array $pageRaw): array
+    {
+        $fields = $pageRaw['fields'] ?? null;
+
+        if (is_array($fields)) {
+            return $fields;
+        }
+
+        $sections = $pageRaw['sections'] ?? null;
+
+        if (! is_array($sections) || $sections === []) {
+            return [];
+        }
+
+        $flattened = [];
+
+        foreach ($sections as $section) {
+            if (! is_array($section)) {
+                continue;
+            }
+
+            $sectionFields = $section['fields'] ?? [];
+
+            if (! is_array($sectionFields)) {
+                continue;
+            }
+
+            foreach ($sectionFields as $field) {
+                if (is_array($field)) {
+                    $flattened[] = $field;
+                }
+            }
+        }
+
+        return $flattened;
     }
 
     private static function normalizeConditions(
         mixed $conditions,
         array $pageKeys,
-        array $sectionKeys,
         array $fieldKeys,
-        array $fieldSectionMap,
         array $fieldPageMap,
         array $fieldNameToKey,
     ): array {
@@ -496,16 +414,12 @@ final class FormSchemaLayout
             $action = trim((string) ($conditionRaw['action'] ?? ''));
             $match = trim((string) ($conditionRaw['match'] ?? self::MATCH_ALL));
 
-            if (! in_array($targetType, [self::TARGET_PAGE, self::TARGET_SECTION, self::TARGET_FIELD], true)) {
+            if (! in_array($targetType, [self::TARGET_PAGE, self::TARGET_FIELD], true)) {
                 throw new InvalidFieldDefinitionException("Condition [{$index}] target_type is invalid.");
             }
 
             if ($targetType === self::TARGET_PAGE && ! in_array($targetKey, $pageKeys, true)) {
                 throw new InvalidFieldDefinitionException("Condition [{$index}] targets unknown page_key [{$targetKey}].");
-            }
-
-            if ($targetType === self::TARGET_SECTION && ! in_array($targetKey, $sectionKeys, true)) {
-                throw new InvalidFieldDefinitionException("Condition [{$index}] targets unknown section_key [{$targetKey}].");
             }
 
             if ($targetType === self::TARGET_FIELD && ! in_array($targetKey, $fieldKeys, true)) {
@@ -568,14 +482,6 @@ final class FormSchemaLayout
                 }
 
                 if (
-                    $targetType === self::TARGET_SECTION
-                    && in_array($action, [self::ACTION_HIDE, self::ACTION_SKIP, self::ACTION_SHOW], true)
-                    && ($fieldSectionMap[$fieldKey] ?? null) === $targetKey
-                ) {
-                    throw new InvalidFieldDefinitionException("Condition [{$index}] creates a section cycle on [{$targetKey}].");
-                }
-
-                if (
                     $targetType === self::TARGET_PAGE
                     && in_array($action, [self::ACTION_HIDE, self::ACTION_SKIP, self::ACTION_SHOW], true)
                     && ($fieldPageMap[$fieldKey] ?? null) === $targetKey
@@ -590,7 +496,10 @@ final class FormSchemaLayout
                 ];
             }
 
-            $conditionKey = self::normalizeKeyValue($conditionRaw['condition_key'] ?? null, 'cd_' . substr(hash('sha256', $index . '|' . $targetType . '|' . $targetKey), 0, 12));
+            $conditionKey = self::normalizeKeyValue(
+                $conditionRaw['condition_key'] ?? null,
+                'cd_' . substr(hash('sha256', $index . '|' . $targetType . '|' . $targetKey), 0, 12),
+            );
 
             $normalized[] = [
                 'condition_key' => $conditionKey,
@@ -611,19 +520,17 @@ final class FormSchemaLayout
         string $action,
         array &$pageVisible,
         array &$pageHiddenHard,
-        array &$sectionVisible,
-        array &$sectionHiddenHard,
         array &$fieldVisible,
         array &$fieldHiddenHard,
         array &$fieldRequired,
         array &$fieldDisabled,
         array $fieldsByPage,
-        array $fieldsBySection,
     ): void {
         if ($targetType === self::TARGET_PAGE) {
             if ($action === self::ACTION_HIDE || $action === self::ACTION_SKIP) {
                 $pageVisible[$targetKey] = false;
                 $pageHiddenHard[$targetKey] = true;
+
                 return;
             }
 
@@ -649,38 +556,10 @@ final class FormSchemaLayout
             return;
         }
 
-        if ($targetType === self::TARGET_SECTION) {
-            if ($action === self::ACTION_HIDE || $action === self::ACTION_SKIP) {
-                $sectionVisible[$targetKey] = false;
-                $sectionHiddenHard[$targetKey] = true;
-                return;
-            }
-
-            if ($action === self::ACTION_SHOW) {
-                if (! ($sectionHiddenHard[$targetKey] ?? false)) {
-                    $sectionVisible[$targetKey] = true;
-                }
-
-                return;
-            }
-
-            foreach ($fieldsBySection[$targetKey] ?? [] as $fieldKey) {
-                if ($action === self::ACTION_REQUIRE) {
-                    $fieldRequired[$fieldKey] = true;
-                    continue;
-                }
-
-                if ($action === self::ACTION_DISABLE) {
-                    $fieldDisabled[$fieldKey] = true;
-                }
-            }
-
-            return;
-        }
-
         if ($action === self::ACTION_HIDE || $action === self::ACTION_SKIP) {
             $fieldVisible[$targetKey] = false;
             $fieldHiddenHard[$targetKey] = true;
+
             return;
         }
 
@@ -778,15 +657,9 @@ final class FormSchemaLayout
                 continue;
             }
 
-            foreach ((array) ($page['sections'] ?? []) as $section) {
-                if (! is_array($section)) {
-                    continue;
-                }
-
-                foreach ((array) ($section['fields'] ?? []) as $field) {
-                    if (is_array($field)) {
-                        $fields[] = $field;
-                    }
+            foreach ((array) ($page['fields'] ?? []) as $field) {
+                if (is_array($field)) {
+                    $fields[] = $field;
                 }
             }
         }
@@ -839,10 +712,5 @@ final class FormSchemaLayout
     private static function defaultPageKey(string $key, string $version): string
     {
         return 'pg_' . substr(hash('sha256', $key . '|' . $version . '|page|0'), 0, 10);
-    }
-
-    private static function defaultSectionKey(string $key, string $version): string
-    {
-        return 'sc_' . substr(hash('sha256', $key . '|' . $version . '|section|0'), 0, 10);
     }
 }
