@@ -7,11 +7,16 @@ use EvanSchleret\FormForge\Exceptions\UnknownFieldsException;
 use EvanSchleret\FormForge\Facades\Form;
 use EvanSchleret\FormForge\FormManager;
 use EvanSchleret\FormForge\Models\FormDraft;
+use EvanSchleret\FormForge\Models\SubmissionAutomationRun;
 use EvanSchleret\FormForge\Models\StagedUpload;
+use EvanSchleret\FormForge\Automations\SubmissionAutomationDispatcher;
 use EvanSchleret\FormForge\Registry\FormRegistry;
+use EvanSchleret\FormForge\Tests\Fixtures\CreateMembershipFromSubmissionAutomation;
 use EvanSchleret\FormForge\Tests\Fixtures\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -254,6 +259,48 @@ it('persists polymorphic submitter columns', function (): void {
 
     expect($submission->submitted_by_type)->toBe($user->getMorphClass());
     expect((string) $submission->submitted_by_id)->toBe((string) $user->getKey());
+});
+
+it('runs code-first submission automations after form submit', function (): void {
+    Schema::create('memberships', function (\Illuminate\Database\Schema\Blueprint $table): void {
+        $table->id();
+        $table->unsignedBigInteger('form_submission_id');
+        $table->string('email');
+        $table->string('plan');
+    });
+
+    $key = 'automation_' . Str::lower(Str::random(8));
+
+    Form::automation($key)
+        ->sync()
+        ->handler(CreateMembershipFromSubmissionAutomation::class, 'create_membership');
+
+    Form::define($key)
+        ->version('1')
+        ->email('email')->required()
+        ->text('plan')->required();
+
+    $submission = Form::get($key, '1')->submit([
+        'email' => 'member@example.com',
+        'plan' => 'pro',
+    ]);
+
+    expect(DB::table('memberships')->count())->toBe(1);
+    expect(DB::table('memberships')->value('email'))->toBe('member@example.com');
+    expect(DB::table('memberships')->value('plan'))->toBe('pro');
+
+    $run = SubmissionAutomationRun::query()->first();
+
+    expect($run)->not->toBeNull();
+    expect($run?->automation_key)->toBe('create_membership');
+    expect($run?->status)->toBe('completed');
+
+    app(SubmissionAutomationDispatcher::class)->dispatch($submission);
+
+    expect(DB::table('memberships')->count())->toBe(1);
+
+    $run->refresh();
+    expect($run->attempts)->toBe(1);
 });
 
 it('supports form category and publication metadata in schema', function (): void {

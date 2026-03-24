@@ -29,6 +29,11 @@ class FormSubmission extends Model
         return $this->hasMany(SubmissionFile::class, 'form_submission_id');
     }
 
+    public function automationRuns(): HasMany
+    {
+        return $this->hasMany(SubmissionAutomationRun::class, 'form_submission_id');
+    }
+
     public function submitter(): MorphTo
     {
         return $this->morphTo(__FUNCTION__, 'submitted_by_type', 'submitted_by_id');

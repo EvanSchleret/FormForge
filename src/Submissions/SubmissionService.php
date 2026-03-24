@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EvanSchleret\FormForge\Submissions;
 
+use EvanSchleret\FormForge\Automations\SubmissionAutomationDispatcher;
 use EvanSchleret\FormForge\Definition\FieldType;
 use EvanSchleret\FormForge\Models\FormSubmission;
 use EvanSchleret\FormForge\Support\FormSchemaLayout;
@@ -18,6 +19,7 @@ class SubmissionService
     public function __construct(
         private readonly SubmissionValidator $validator,
         private readonly UploadManager $uploadManager,
+        private readonly SubmissionAutomationDispatcher $automations,
     ) {
     }
 
@@ -81,7 +83,10 @@ class SubmissionService
             return $submission;
         });
 
-        return $submission->load('files');
+        $submission = $submission->load('files');
+        $this->automations->dispatch($submission);
+
+        return $submission;
     }
 
     private function normalizePayload(array $schema, array $fields, array $validated, ?Model $submittedBy = null): array

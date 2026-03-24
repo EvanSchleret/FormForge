@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace EvanSchleret\FormForge;
 
+use EvanSchleret\FormForge\Automations\AutomationRegistry;
+use EvanSchleret\FormForge\Automations\SubmissionAutomationDispatcher;
 use EvanSchleret\FormForge\Commands\DescribeCommand;
 use EvanSchleret\FormForge\Commands\DraftsCleanupCommand;
 use EvanSchleret\FormForge\Commands\HttpOptionsCommand;
@@ -34,6 +36,7 @@ class FormForgeServiceProvider extends ServiceProvider
         $this->mergeConfigFrom(dirname(__DIR__) . '/config/formforge.php', 'formforge');
 
         $this->app->singleton(FormRegistry::class, static fn (): FormRegistry => new FormRegistry());
+        $this->app->singleton(AutomationRegistry::class, static fn (): AutomationRegistry => new AutomationRegistry());
         $this->app->singleton(FormDefinitionRepository::class, static fn (): FormDefinitionRepository => new FormDefinitionRepository());
         $this->app->singleton(FormMutationService::class, fn (): FormMutationService => new FormMutationService(
             repository: $this->app->make(FormDefinitionRepository::class),
@@ -58,10 +61,19 @@ class FormForgeServiceProvider extends ServiceProvider
         );
 
         $this->app->singleton(
+            SubmissionAutomationDispatcher::class,
+            fn (): SubmissionAutomationDispatcher => new SubmissionAutomationDispatcher(
+                registry: $this->app->make(AutomationRegistry::class),
+                bus: $this->app->make(\Illuminate\Contracts\Bus\Dispatcher::class),
+            ),
+        );
+
+        $this->app->singleton(
             SubmissionService::class,
             fn (): SubmissionService => new SubmissionService(
                 validator: $this->app->make(SubmissionValidator::class),
                 uploadManager: $this->app->make(UploadManager::class),
+                automations: $this->app->make(SubmissionAutomationDispatcher::class),
             ),
         );
 
@@ -71,6 +83,7 @@ class FormForgeServiceProvider extends ServiceProvider
                 registry: $this->app->make(FormRegistry::class),
                 repository: $this->app->make(FormDefinitionRepository::class),
                 submissionService: $this->app->make(SubmissionService::class),
+                automationRegistry: $this->app->make(AutomationRegistry::class),
             ),
         );
     }

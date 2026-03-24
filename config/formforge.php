@@ -23,6 +23,7 @@ return [
         'staged_uploads_table' => 'formforge_staged_uploads',
         'idempotency_keys_table' => 'formforge_idempotency_keys',
         'drafts_table' => 'formforge_drafts',
+        'automation_runs_table' => 'formforge_submission_automation_runs',
     ],
 
     /*
@@ -94,6 +95,25 @@ return [
 
     'validation' => [
         'reject_unknown_fields' => true,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Submission Automations
+    |--------------------------------------------------------------------------
+    |
+    | Runtime automations are registered in code (ServiceProvider/boot logic),
+    | not in configuration. This section only controls infrastructure behavior.
+    |
+    */
+
+    'automations' => [
+        'enabled' => true,
+        'queue' => [
+            'enabled' => true,
+            'connection' => null,
+            'name' => null,
+        ],
     ],
 
     /*

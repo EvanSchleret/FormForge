@@ -271,6 +271,62 @@ TTL:
 ],
 ```
 
+## Submission automations (code-first)
+
+FormForge can run custom application code right after a submission is persisted.
+
+Automations are registered in code, not in config mappings.
+
+Example in `AppServiceProvider::boot()`:
+
+```php
+<?php
+
+declare(strict_types=1);
+
+use App\FormForge\Automations\CreateMembershipFromSubmission;
+use EvanSchleret\FormForge\Facades\Form;
+
+Form::automation('membership-application')
+    ->sync()
+    ->handler(CreateMembershipFromSubmission::class, 'create_membership');
+```
+
+Queued execution:
+
+```php
+Form::automation('membership-application')
+    ->queue('formforge')
+    ->handler(CreateMembershipFromSubmission::class);
+```
+
+Handler contract:
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\FormForge\Automations;
+
+use EvanSchleret\FormForge\Automations\Contracts\SubmissionAutomation;
+use EvanSchleret\FormForge\Models\FormSubmission;
+
+final class CreateMembershipFromSubmission implements SubmissionAutomation
+{
+    public function handle(FormSubmission $submission): void
+    {
+        // business logic using $submission->payload
+    }
+}
+```
+
+Notes:
+
+- run tracking is persisted in `formforge_submission_automation_runs`
+- execution is idempotent per `(submission_id, automation_key)`
+- infrastructure defaults are configurable under `formforge.automations.*`
+
 ## Useful commands
 
 ```bash

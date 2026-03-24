@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace EvanSchleret\FormForge;
 
+use EvanSchleret\FormForge\Automations\AutomationBuilder;
+use EvanSchleret\FormForge\Automations\AutomationRegistry;
 use EvanSchleret\FormForge\Definition\FormBlueprint;
 use EvanSchleret\FormForge\Exceptions\DuplicateFormVersionException;
 use EvanSchleret\FormForge\Exceptions\FormNotFoundException;
@@ -23,6 +25,7 @@ class FormManager
         private readonly FormRegistry $registry,
         private readonly FormDefinitionRepository $repository,
         private readonly SubmissionService $submissionService,
+        private readonly AutomationRegistry $automationRegistry,
     ) {
     }
 
@@ -126,6 +129,11 @@ class FormManager
         );
 
         return $instances;
+    }
+
+    public function automation(string $formKey): AutomationBuilder
+    {
+        return $this->automationRegistry->forForm($formKey);
     }
 
     public function sync(): array
