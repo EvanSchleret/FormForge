@@ -9,6 +9,28 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 
+/**
+ * @property int $id
+ * @property string $form_key
+ * @property string $form_version
+ * @property array<string, mixed> $payload
+ * @property bool $is_test
+ * @property string|null $submitted_by_type
+ * @property string|null $submitted_by_id
+ * @property string|null $ip_address
+ * @property string|null $user_agent
+ * @property array<string, mixed>|null $meta
+ * @property \Illuminate\Support\Carbon|null $created_at
+ * @property \Illuminate\Support\Carbon|null $updated_at
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, SubmissionFile> $files
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, SubmissionAutomationRun> $automationRuns
+ * @property-read \Illuminate\Database\Eloquent\Model|null $submitter
+ *
+ * @method static Builder<self> query()
+ * @method static Builder<self> whereForm(string $formKey)
+ * @method static Builder<self> whereVersion(string $formVersion)
+ * @method static Builder<self> whereTest(bool $isTest = true)
+ */
 class FormSubmission extends Model
 {
     protected $guarded = [];

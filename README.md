@@ -271,6 +271,29 @@ TTL:
 ],
 ```
 
+## Generate automation scaffold
+
+Use the generator command as the default entrypoint for submission automations:
+
+```bash
+php artisan formforge:make:automation CreateUserFromSubmission --form=user-registration --sync
+```
+
+Common variants:
+
+```bash
+php artisan formforge:make:automation User/CreateUserFromSubmission --form=user-registration --sync
+php artisan formforge:make:automation CreateUserFromSubmission --form=user-registration --queue=formforge
+```
+
+Useful options:
+
+- `--form=`: target form key for generated registration snippet
+- `--sync`: generate sync registration snippet
+- `--queue=` and `--connection=`: generate queued registration snippet
+- `--path=` and `--namespace=`: customize destination and namespace
+- `--force`: overwrite existing file
+
 ## Submission automations (code-first)
 
 FormForge can run custom application code right after a submission is persisted.
@@ -284,20 +307,20 @@ Example in `AppServiceProvider::boot()`:
 
 declare(strict_types=1);
 
-use App\FormForge\Automations\CreateMembershipFromSubmission;
+use App\FormForge\Automations\CreateUserFromSubmission;
 use EvanSchleret\FormForge\Facades\Form;
 
-Form::automation('membership-application')
+Form::automation('user-registration')
     ->sync()
-    ->handler(CreateMembershipFromSubmission::class, 'create_membership');
+    ->handler(CreateUserFromSubmission::class, 'create_user');
 ```
 
 Queued execution:
 
 ```php
-Form::automation('membership-application')
+Form::automation('user-registration')
     ->queue('formforge')
-    ->handler(CreateMembershipFromSubmission::class);
+    ->handler(CreateUserFromSubmission::class);
 ```
 
 Handler contract:
@@ -312,7 +335,7 @@ namespace App\FormForge\Automations;
 use EvanSchleret\FormForge\Automations\Contracts\SubmissionAutomation;
 use EvanSchleret\FormForge\Models\FormSubmission;
 
-final class CreateMembershipFromSubmission implements SubmissionAutomation
+final class CreateUserFromSubmission implements SubmissionAutomation
 {
     public function handle(FormSubmission $submission): void
     {
@@ -332,6 +355,7 @@ Notes:
 ```bash
 php artisan formforge:install
 php artisan formforge:sync
+php artisan formforge:make:automation CreateUserFromSubmission --form=user-registration --sync
 php artisan formforge:list
 php artisan formforge:describe contact
 php artisan formforge:http:options

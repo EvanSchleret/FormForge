@@ -13,6 +13,7 @@ use EvanSchleret\FormForge\Commands\HttpResolveCommand;
 use EvanSchleret\FormForge\Commands\HttpRoutesCommand;
 use EvanSchleret\FormForge\Commands\InstallCommand;
 use EvanSchleret\FormForge\Commands\ListCommand;
+use EvanSchleret\FormForge\Commands\MakeAutomationCommand;
 use EvanSchleret\FormForge\Commands\SyncCommand;
 use EvanSchleret\FormForge\Commands\UploadsCleanupCommand;
 use EvanSchleret\FormForge\Http\EndpointRequestGuard;
@@ -110,6 +111,7 @@ class FormForgeServiceProvider extends ServiceProvider
         if ($this->app->runningInConsole()) {
             $this->commands([
                 InstallCommand::class,
+                MakeAutomationCommand::class,
                 ListCommand::class,
                 DescribeCommand::class,
                 SyncCommand::class,

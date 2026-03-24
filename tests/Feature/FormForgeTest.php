@@ -16,6 +16,7 @@ use EvanSchleret\FormForge\Tests\Fixtures\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -354,6 +355,26 @@ it('supports list command filtering by category and publication', function (): v
     $this->artisan('formforge:list --category=survey --published=yes')
         ->expectsOutputToContain($surveyKey)
         ->assertExitCode(0);
+});
+
+it('scaffolds a submission automation class with make command', function (): void {
+    $directory = storage_path('app/formforge-tests/automations/' . Str::lower(Str::random(8)));
+    File::ensureDirectoryExists($directory);
+
+    $this->artisan("formforge:make:automation Membership/CreateMembership --path={$directory} --namespace=App\\\\FormForge\\\\Automations --form=membership-application --sync")
+        ->expectsOutputToContain('Automation created:')
+        ->expectsOutputToContain("Form::automation('membership-application')->sync()->handler(")
+        ->assertExitCode(0);
+
+    $generated = $directory . '/Membership/CreateMembership.php';
+
+    expect(File::exists($generated))->toBeTrue();
+
+    $content = (string) File::get($generated);
+
+    expect($content)->toContain('namespace App\\FormForge\\Automations\\Membership;');
+    expect($content)->toContain('class CreateMembership implements SubmissionAutomation');
+    expect($content)->toContain('public function handle(FormSubmission $submission): void');
 });
 
 it('cleans up expired staged upload tokens and temporary files', function (): void {
