@@ -169,6 +169,13 @@ return [
             // Optional JsonResource class for submitted_by relation.
             // Example: App\Http\Resources\UserResource::class
             'submitter' => null,
+            // File URL enrichment for payload/files metadata returned by default resource.
+            'file_urls' => [
+                'enabled' => env('FORMFORGE_HTTP_FILE_URLS_ENABLED', false),
+                'temporary' => env('FORMFORGE_HTTP_FILE_URLS_TEMPORARY', true),
+                'ttl_seconds' => env('FORMFORGE_HTTP_FILE_URLS_TTL', 900),
+                'key' => env('FORMFORGE_HTTP_FILE_URL_KEY', 'url'),
+            ],
         ],
         'idempotency' => [
             'ttl_minutes' => env('FORMFORGE_HTTP_IDEMPOTENCY_TTL', 1440),

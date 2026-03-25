@@ -8,9 +8,11 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Illuminate\Support\Str;
 
 /**
  * @property int $id
+ * @property string $uuid
  * @property string $form_key
  * @property string $form_version
  * @property array<string, mixed> $payload
@@ -40,6 +42,19 @@ class FormSubmission extends Model
         'is_test' => 'boolean',
         'meta' => 'array',
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(static function (self $submission): void {
+            $candidate = trim((string) $submission->getAttribute('uuid'));
+
+            if ($candidate !== '') {
+                return;
+            }
+
+            $submission->setAttribute('uuid', (string) Str::uuid());
+        });
+    }
 
     public function getTable(): string
     {

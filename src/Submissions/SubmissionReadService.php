@@ -31,11 +31,11 @@ class SubmissionReadService
         return $query->paginate($perPage);
     }
 
-    public function findForForm(string $formKey, int $submissionId): ?FormSubmission
+    public function findForForm(string $formKey, string $submissionUuid): ?FormSubmission
     {
         return FormSubmission::query()
             ->where('form_key', $formKey)
-            ->whereKey($submissionId)
+            ->where('uuid', $submissionUuid)
             ->with('files')
             ->first();
     }
@@ -47,11 +47,11 @@ class SubmissionReadService
             ->exists();
     }
 
-    public function deleteForForm(string $formKey, int $submissionId): bool
+    public function deleteForForm(string $formKey, string $submissionUuid): bool
     {
         $submission = FormSubmission::query()
             ->where('form_key', $formKey)
-            ->whereKey($submissionId)
+            ->where('uuid', $submissionUuid)
             ->first();
 
         if (! $submission instanceof FormSubmission) {

@@ -138,6 +138,39 @@ it('supports configurable submitter resource serialization for submissions', fun
         ->assertJsonPath('data.data.0.submitted_by.name', 'Evan');
 });
 
+it('enriches file metadata with urls when enabled', function (): void {
+    config()->set('formforge.uploads.mode', 'direct');
+    config()->set('formforge.http.resources.file_urls.enabled', true);
+    config()->set('formforge.http.resources.file_urls.temporary', true);
+    config()->set('formforge.http.resources.file_urls.ttl_seconds', 600);
+    config()->set('formforge.uploads.disk', 'local');
+
+    Storage::disk('local')->put('formforge-tests/incoming/identity.pdf', 'content');
+    Storage::disk('local')->buildTemporaryUrlsUsing(
+        static fn (string $path, \DateTimeInterface $expiration): string => 'https://signed.example.test/' . ltrim($path, '/') . '?expires=' . $expiration->getTimestamp(),
+    );
+
+    $key = 'signed_urls_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->file('identity_document')->required()->storageDisk('local');
+
+    $response = $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'identity_document' => [
+            'disk' => 'local',
+            'path' => 'formforge-tests/incoming/identity.pdf',
+        ],
+    ])->assertCreated();
+
+    $payloadUrl = (string) $response->json('data.payload.identity_document.url');
+    $fileUrl = (string) $response->json('data.files.0.url');
+
+    expect($payloadUrl)->not->toBe('');
+    expect($payloadUrl)->toContain('formforge-tests/incoming/identity.pdf');
+    expect($fileUrl)->toBe($payloadUrl);
+});
+
 it('allows per-form submission auth override to public', function (): void {
     config()->set('formforge.http.submission.auth', 'required');
 
@@ -279,6 +312,26 @@ it('supports staged upload then JSON submit with upload_token', function (): voi
 
     $path = (string) $submitResponse->json('data.payload.resume.path');
     Storage::disk('local')->assertExists($path);
+});
+
+it('allows submitting staged forms when optional file fields are omitted', function (): void {
+    config()->set('formforge.uploads.mode', 'staged');
+
+    $key = 'staged_optional_files_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('short_text')->required()
+        ->file('first_optional_file')
+        ->file('second_optional_file');
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'payload' => [
+            'short_text' => 'serg',
+        ],
+    ])
+        ->assertCreated()
+        ->assertJsonPath('data.payload.short_text', 'serg');
 });
 
 it('creates a form revision through management endpoint', function (): void {
@@ -434,11 +487,11 @@ it('returns one form response through management endpoint', function (): void {
         'name' => 'One',
     ])->assertCreated();
 
-    $submissionId = (int) $submit->json('data.id');
+    $submissionUuid = (string) $submit->json('data.id');
 
-    $this->getJson("/api/formforge/v1/forms/{$key}/responses/{$submissionId}")
+    $this->getJson("/api/formforge/v1/forms/{$key}/responses/{$submissionUuid}")
         ->assertOk()
-        ->assertJsonPath('data.id', $submissionId)
+        ->assertJsonPath('data.id', $submissionUuid)
         ->assertJsonPath('data.form_key', $key)
         ->assertJsonPath('data.payload.name', 'One');
 });
@@ -454,16 +507,16 @@ it('deletes one form response through management endpoint', function (): void {
         'name' => 'To Delete',
     ])->assertCreated();
 
-    $submissionId = (int) $submit->json('data.id');
+    $submissionUuid = (string) $submit->json('data.id');
 
-    $this->deleteJson("/api/formforge/v1/forms/{$key}/responses/{$submissionId}")
+    $this->deleteJson("/api/formforge/v1/forms/{$key}/responses/{$submissionUuid}")
         ->assertOk()
         ->assertJsonPath('data.form_key', $key)
-        ->assertJsonPath('data.submission_id', $submissionId)
+        ->assertJsonPath('data.submission_uuid', $submissionUuid)
         ->assertJsonPath('data.deleted', true);
 
     $this->assertDatabaseMissing('formforge_submissions', [
-        'id' => $submissionId,
+        'uuid' => $submissionUuid,
         'form_key' => $key,
     ]);
 });
@@ -639,19 +692,19 @@ it('supports management response delete ability authorization', function (): voi
         'name' => 'Alpha',
     ])->assertCreated();
 
-    $submissionId = (int) $submit->json('data.id');
+    $submissionUuid = (string) $submit->json('data.id');
 
-    $this->deleteJson("/api/formforge/v1/forms/{$key}/responses/{$submissionId}")
+    $this->deleteJson("/api/formforge/v1/forms/{$key}/responses/{$submissionUuid}")
         ->assertUnauthorized();
 
     $denied = User::query()->create(['name' => 'denied']);
 
-    $this->actingAs($denied)->deleteJson("/api/formforge/v1/forms/{$key}/responses/{$submissionId}")
+    $this->actingAs($denied)->deleteJson("/api/formforge/v1/forms/{$key}/responses/{$submissionUuid}")
         ->assertForbidden();
 
     $allowed = User::query()->create(['name' => 'allowed']);
 
-    $this->actingAs($allowed)->deleteJson("/api/formforge/v1/forms/{$key}/responses/{$submissionId}")
+    $this->actingAs($allowed)->deleteJson("/api/formforge/v1/forms/{$key}/responses/{$submissionUuid}")
         ->assertOk()
         ->assertJsonPath('data.deleted', true);
 });

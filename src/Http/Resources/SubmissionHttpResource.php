@@ -8,6 +8,7 @@ use EvanSchleret\FormForge\Exceptions\FormForgeException;
 use EvanSchleret\FormForge\Models\FormSubmission;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Storage;
 
 class SubmissionHttpResource
 {
@@ -21,6 +22,26 @@ class SubmissionHttpResource
         }
 
         $data = $submission->toArray();
+        $data['id'] = (string) ($submission->uuid ?? '');
+        unset($data['uuid']);
+
+        if (array_key_exists('payload', $data)) {
+            $data['payload'] = $this->attachFileUrls($data['payload']);
+        }
+
+        if (isset($data['files']) && is_array($data['files'])) {
+            $data['files'] = array_map(function (mixed $file): array {
+                if (! is_array($file)) {
+                    return [];
+                }
+
+                unset($file['id'], $file['form_submission_id']);
+                $file = $this->attachFileUrls($file);
+
+                return $file;
+            }, $data['files']);
+        }
+
         $submitterResourceClass = $this->normalizeResourceClass(config('formforge.http.resources.submitter'));
 
         if ($submitterResourceClass !== null) {
@@ -93,5 +114,72 @@ class SubmissionHttpResource
         $request = app('request');
 
         return $request instanceof Request ? $request : Request::create('/', 'GET');
+    }
+
+    private function attachFileUrls(mixed $value): mixed
+    {
+        if (! is_array($value)) {
+            return $value;
+        }
+
+        if ($this->looksLikeStoredFile($value)) {
+            $url = $this->resolveFileUrl($value);
+            $key = $this->fileUrlKey();
+
+            if ($url !== null && $key !== '') {
+                $value[$key] = $url;
+            }
+        }
+
+        foreach ($value as $entryKey => $entryValue) {
+            $value[$entryKey] = $this->attachFileUrls($entryValue);
+        }
+
+        return $value;
+    }
+
+    private function looksLikeStoredFile(array $value): bool
+    {
+        $disk = $value['disk'] ?? null;
+        $path = $value['path'] ?? null;
+
+        return is_string($disk) && trim($disk) !== '' && is_string($path) && trim($path) !== '';
+    }
+
+    private function resolveFileUrl(array $file): ?string
+    {
+        if (! (bool) config('formforge.http.resources.file_urls.enabled', false)) {
+            return null;
+        }
+
+        $disk = trim((string) ($file['disk'] ?? ''));
+        $path = trim((string) ($file['path'] ?? ''));
+
+        if ($disk === '' || $path === '') {
+            return null;
+        }
+
+        $temporary = (bool) config('formforge.http.resources.file_urls.temporary', true);
+        $ttl = max(1, (int) config('formforge.http.resources.file_urls.ttl_seconds', 900));
+
+        if ($temporary) {
+            try {
+                return Storage::disk($disk)->temporaryUrl($path, now()->addSeconds($ttl));
+            } catch (\Throwable) {
+            }
+        }
+
+        try {
+            return Storage::disk($disk)->url($path);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private function fileUrlKey(): string
+    {
+        $key = trim((string) config('formforge.http.resources.file_urls.key', 'url'));
+
+        return $key === '' ? 'url' : $key;
     }
 }

@@ -84,10 +84,10 @@ Route::prefix($prefix)
         });
 
         Route::middleware('formforge.endpoint:management,response')->group(static function (): void {
-            Route::get('/forms/{key}/responses/{submissionId}', [FormManagementController::class, 'response']);
+            Route::get('/forms/{key}/responses/{submissionUuid}', [FormManagementController::class, 'response']);
         });
 
         Route::middleware('formforge.endpoint:management,response_delete')->group(static function (): void {
-            Route::delete('/forms/{key}/responses/{submissionId}', [FormManagementController::class, 'deleteResponse']);
+            Route::delete('/forms/{key}/responses/{submissionUuid}', [FormManagementController::class, 'deleteResponse']);
         });
     });

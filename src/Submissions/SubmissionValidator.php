@@ -195,31 +195,31 @@ class SubmissionValidator
         $rules[$name] = $baseRules;
 
         if ($multiple) {
-            $rules[$name . '.*'] = ['array'];
-            $rules[$name . '.*.upload_token'] = ['nullable', 'string'];
-            $rules[$name . '.*.path'] = ['required_without:' . $name . '.*.upload_token', 'string'];
-            $rules[$name . '.*.disk'] = ['nullable', 'string'];
-            $rules[$name . '.*.original_name'] = ['nullable', 'string'];
-            $rules[$name . '.*.stored_name'] = ['nullable', 'string'];
-            $rules[$name . '.*.mime_type'] = ['nullable', 'string'];
-            $rules[$name . '.*.extension'] = ['nullable', 'string'];
-            $rules[$name . '.*.size'] = ['nullable', 'integer', 'min:0'];
-            $rules[$name . '.*.checksum'] = ['nullable', 'string'];
-            $rules[$name . '.*.metadata'] = ['nullable', 'array'];
+            $rules[$name . '.*'] = ['exclude_without:' . $name, 'array'];
+            $rules[$name . '.*.upload_token'] = ['exclude_without:' . $name, 'nullable', 'string'];
+            $rules[$name . '.*.path'] = ['exclude_without:' . $name, 'required_without:' . $name . '.*.upload_token', 'string'];
+            $rules[$name . '.*.disk'] = ['exclude_without:' . $name, 'nullable', 'string'];
+            $rules[$name . '.*.original_name'] = ['exclude_without:' . $name, 'nullable', 'string'];
+            $rules[$name . '.*.stored_name'] = ['exclude_without:' . $name, 'nullable', 'string'];
+            $rules[$name . '.*.mime_type'] = ['exclude_without:' . $name, 'nullable', 'string'];
+            $rules[$name . '.*.extension'] = ['exclude_without:' . $name, 'nullable', 'string'];
+            $rules[$name . '.*.size'] = ['exclude_without:' . $name, 'nullable', 'integer', 'min:0'];
+            $rules[$name . '.*.checksum'] = ['exclude_without:' . $name, 'nullable', 'string'];
+            $rules[$name . '.*.metadata'] = ['exclude_without:' . $name, 'nullable', 'array'];
 
             return;
         }
 
-        $rules[$name . '.upload_token'] = ['nullable', 'string'];
-        $rules[$name . '.path'] = ['required_without:' . $name . '.upload_token', 'string'];
-        $rules[$name . '.disk'] = ['nullable', 'string'];
-        $rules[$name . '.original_name'] = ['nullable', 'string'];
-        $rules[$name . '.stored_name'] = ['nullable', 'string'];
-        $rules[$name . '.mime_type'] = ['nullable', 'string'];
-        $rules[$name . '.extension'] = ['nullable', 'string'];
-        $rules[$name . '.size'] = ['nullable', 'integer', 'min:0'];
-        $rules[$name . '.checksum'] = ['nullable', 'string'];
-        $rules[$name . '.metadata'] = ['nullable', 'array'];
+        $rules[$name . '.upload_token'] = ['exclude_without:' . $name, 'nullable', 'string'];
+        $rules[$name . '.path'] = ['exclude_without:' . $name, 'required_without:' . $name . '.upload_token', 'string'];
+        $rules[$name . '.disk'] = ['exclude_without:' . $name, 'nullable', 'string'];
+        $rules[$name . '.original_name'] = ['exclude_without:' . $name, 'nullable', 'string'];
+        $rules[$name . '.stored_name'] = ['exclude_without:' . $name, 'nullable', 'string'];
+        $rules[$name . '.mime_type'] = ['exclude_without:' . $name, 'nullable', 'string'];
+        $rules[$name . '.extension'] = ['exclude_without:' . $name, 'nullable', 'string'];
+        $rules[$name . '.size'] = ['exclude_without:' . $name, 'nullable', 'integer', 'min:0'];
+        $rules[$name . '.checksum'] = ['exclude_without:' . $name, 'nullable', 'string'];
+        $rules[$name . '.metadata'] = ['exclude_without:' . $name, 'nullable', 'array'];
     }
 
     private function normalizeRules(mixed $rules): array

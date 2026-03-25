@@ -155,11 +155,18 @@ You can customize submission serialization with Laravel `JsonResource` classes:
     'resources' => [
         'submission' => null, // optional full submission resource class
         'submitter' => \App\Http\Resources\UserResource::class, // optional submitted_by resource class
+        'file_urls' => [
+            'enabled' => true,
+            'temporary' => true,
+            'ttl_seconds' => 900,
+            'key' => 'url',
+        ],
     ],
 ],
 ```
 
 With `submitter`, submission payloads include a `submitted_by` key serialized through your resource.
+With `file_urls.enabled=true`, default submission resources enrich file metadata (in both `payload` and `files`) with signed temporary URLs when supported by the disk, with fallback to regular disk URLs.
 
 ### Schema endpoints
 
@@ -209,8 +216,8 @@ Draft behavior:
 - `GET /forms/{key}/revisions` (`include_deleted=1` supported)
 - `GET /forms/{key}/diff/{fromVersion}/{toVersion}`
 - `GET /forms/{key}/responses` (paginated list of form submissions)
-- `GET /forms/{key}/responses/{submissionId}` (single submission detail)
-- `DELETE /forms/{key}/responses/{submissionId}` (delete one submission)
+- `GET /forms/{key}/responses/{submissionUuid}` (single submission detail)
+- `DELETE /forms/{key}/responses/{submissionUuid}` (delete one submission)
 
 Creation rule:
 

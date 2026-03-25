@@ -68,20 +68,17 @@ class FormManagementController
         SubmissionReadService $submissions,
         SubmissionHttpResource $resources,
         string $key,
-        string $submissionId,
+        string $submissionUuid,
     ): JsonResponse {
         if (! $repository->keyExists($key, true) && ! $submissions->existsForForm($key)) {
             throw new NotFoundHttpException("Form [{$key}] not found.");
         }
 
-        if (! ctype_digit($submissionId)) {
-            throw new NotFoundHttpException("Submission [{$submissionId}] not found for form [{$key}].");
-        }
-
-        $submission = $submissions->findForForm($key, (int) $submissionId);
+        $submissionUuid = trim($submissionUuid);
+        $submission = $submissions->findForForm($key, $submissionUuid);
 
         if ($submission === null) {
-            throw new NotFoundHttpException("Submission [{$submissionId}] not found for form [{$key}].");
+            throw new NotFoundHttpException("Submission [{$submissionUuid}] not found for form [{$key}].");
         }
 
         return response()->json([
@@ -93,26 +90,23 @@ class FormManagementController
         FormDefinitionRepository $repository,
         SubmissionReadService $submissions,
         string $key,
-        string $submissionId,
+        string $submissionUuid,
     ): JsonResponse {
         if (! $repository->keyExists($key, true) && ! $submissions->existsForForm($key)) {
             throw new NotFoundHttpException("Form [{$key}] not found.");
         }
 
-        if (! ctype_digit($submissionId)) {
-            throw new NotFoundHttpException("Submission [{$submissionId}] not found for form [{$key}].");
-        }
-
-        $deleted = $submissions->deleteForForm($key, (int) $submissionId);
+        $submissionUuid = trim($submissionUuid);
+        $deleted = $submissions->deleteForForm($key, $submissionUuid);
 
         if (! $deleted) {
-            throw new NotFoundHttpException("Submission [{$submissionId}] not found for form [{$key}].");
+            throw new NotFoundHttpException("Submission [{$submissionUuid}] not found for form [{$key}].");
         }
 
         return response()->json([
             'data' => [
                 'form_key' => $key,
-                'submission_id' => (int) $submissionId,
+                'submission_uuid' => $submissionUuid,
                 'deleted' => true,
             ],
         ]);

@@ -51,8 +51,8 @@ class HttpRoutesCommand extends Command
             ['GET', '/' . $prefix . '/forms/{key}/revisions', 'management(revisions)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])],
             ['GET', '/' . $prefix . '/forms/{key}/diff/{fromVersion}/{toVersion}', 'management(diff)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])],
             ['GET', '/' . $prefix . '/forms/{key}/responses', 'management(responses)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])],
-            ['GET', '/' . $prefix . '/forms/{key}/responses/{submissionId}', 'management(response)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])],
-            ['DELETE', '/' . $prefix . '/forms/{key}/responses/{submissionId}', 'management(response_delete)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])],
+            ['GET', '/' . $prefix . '/forms/{key}/responses/{submissionUuid}', 'management(response)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])],
+            ['DELETE', '/' . $prefix . '/forms/{key}/responses/{submissionUuid}', 'management(response_delete)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])],
         ];
 
         $this->info('Global route middleware');
