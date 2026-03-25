@@ -52,6 +52,36 @@ Run migrations:
 php artisan migrate
 ```
 
+### Upgrade existing installation safely
+
+When FormForge ships new config keys or updated config comments, use:
+
+```bash
+php artisan formforge:install:merge
+```
+
+What this command does:
+
+- keeps your existing values
+- keeps Laravel-style comment blocks from the latest package config
+- adds missing keys introduced by newer FormForge versions
+- updates changed default comments/structure without resetting your overrides
+- optionally publishes missing migrations (unless `--skip-migrations` is used)
+
+Recommended workflow:
+
+```bash
+php artisan formforge:install:merge --dry-run
+php artisan formforge:install:merge
+php artisan migrate
+```
+
+Available options:
+
+- `--dry-run`: preview merge changes without writing files
+- `--skip-migrations`: do not publish missing migrations during merge
+- `--no-backup`: skip backup generation for `config/formforge.php` before rewrite
+
 ## Quick start
 
 ```php
@@ -116,6 +146,21 @@ At submission time, FormForge resolves the effective schema from payload + condi
 
 Default prefix: `api/formforge/v1`
 
+### API resource customization
+
+You can customize submission serialization with Laravel `JsonResource` classes:
+
+```php
+'http' => [
+    'resources' => [
+        'submission' => null, // optional full submission resource class
+        'submitter' => \App\Http\Resources\UserResource::class, // optional submitted_by resource class
+    ],
+],
+```
+
+With `submitter`, submission payloads include a `submitted_by` key serialized through your resource.
+
 ### Schema endpoints
 
 - `GET /forms/{key}`
@@ -163,6 +208,9 @@ Draft behavior:
 - `DELETE /forms/{key}` (soft delete all revisions)
 - `GET /forms/{key}/revisions` (`include_deleted=1` supported)
 - `GET /forms/{key}/diff/{fromVersion}/{toVersion}`
+- `GET /forms/{key}/responses` (paginated list of form submissions)
+- `GET /forms/{key}/responses/{submissionId}` (single submission detail)
+- `DELETE /forms/{key}/responses/{submissionId}` (delete one submission)
 
 Creation rule:
 
@@ -213,6 +261,9 @@ Example:
             'delete' => 'formforge.delete',
             'revisions' => 'formforge.read-revisions',
             'diff' => 'formforge.read-diff',
+            'responses' => 'formforge.read-responses',
+            'response' => 'formforge.read-response',
+            'response_delete' => 'formforge.delete-response',
         ],
     ],
 ],
@@ -354,6 +405,7 @@ Notes:
 
 ```bash
 php artisan formforge:install
+php artisan formforge:install:merge
 php artisan formforge:sync
 php artisan formforge:make:automation CreateUserFromSubmission --form=user-registration --sync
 php artisan formforge:list
@@ -376,6 +428,7 @@ Use them to guide AI agents implementing FormForge in Laravel APIs.
 
 ## Roadmap
 
+- [ ] Add first-party Laravel MCP integration (resources + tools) for AI-assisted FormForge implementation
 - [ ] Add first-class signed upload URL flow for object storage direct upload
 - [ ] Add cleanup command for expired idempotency keys
 - [ ] Add OpenAPI export command for FormForge HTTP contracts
@@ -383,14 +436,20 @@ Use them to guide AI agents implementing FormForge in Laravel APIs.
 - [ ] Add revision migration tooling (dry-run + apply) for schema evolution
 - [ ] Add full FormForge page analytics helpers
 - [ ] Add first-party Laravel Boost template pack for FormForge + auth presets
+- [ ] Add submissions export command (CSV/JSONL) with filters
+- [ ] Add webhook delivery for submission lifecycle events with retry + signature
+- [ ] Add retention/anonymization command for old submissions (GDPR-friendly)
+- [ ] Add response search/filter API (by date, test/live, version, submitter)
+- [ ] Add configurable submission notifications (global and per-form) for channels like Telegram, Discord, Slack, and custom webhooks
 
 ## Other packages
 
-If you want to explore more of my Laravel packages:
+If you want to explore more of my packages:
 
 - [evanschleret/lara-mjml](https://github.com/EvanSchleret/lara-mjml)
 - [evanschleret/laravel-user-presence](https://github.com/EvanSchleret/laravel-user-presence)
 - [evanschleret/laravel-typebridge](https://github.com/EvanSchleret/laravel-typebridge)
+- [evanschleret/formformclient (FormForge Client)](https://github.com/EvanSchleret/formforgeclient)
 
 ## Open source
 

@@ -21,6 +21,9 @@ Use these rules when implementing or extending FormForge integrations in Laravel
   - `DELETE /forms/{key}`
   - `GET /forms/{key}/revisions`
   - `GET /forms/{key}/diff/{fromVersion}/{toVersion}`
+  - `GET /forms/{key}/responses`
+  - `GET /forms/{key}/responses/{submissionId}`
+  - `DELETE /forms/{key}/responses/{submissionId}`
 - Resolve/draft endpoints:
   - `POST /forms/{key}/resolve`
   - `POST /forms/{key}/drafts`

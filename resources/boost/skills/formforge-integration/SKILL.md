@@ -37,6 +37,9 @@ Implement FormForge end-to-end in a Laravel API with:
 - `DELETE /forms/{key}`: soft delete revisions
 - `GET /forms/{key}/revisions`: read history
 - `GET /forms/{key}/diff/{fromVersion}/{toVersion}`: read changes
+- `GET /forms/{key}/responses`: paginated submission list
+- `GET /forms/{key}/responses/{submissionId}`: single submission detail
+- `DELETE /forms/{key}/responses/{submissionId}`: delete one submission
 - `POST /forms/{key}/resolve`: resolve effective schema from payload
 - `POST /forms/{key}/drafts`: save current user draft
 - `GET /forms/{key}/drafts/current`: fetch current user draft

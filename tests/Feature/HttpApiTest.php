@@ -5,6 +5,7 @@ declare(strict_types=1);
 use EvanSchleret\FormForge\Facades\Form;
 use EvanSchleret\FormForge\Tests\Fixtures\MarkSubmissionMiddleware;
 use EvanSchleret\FormForge\Tests\Fixtures\User;
+use EvanSchleret\FormForge\Tests\Fixtures\UserSummaryResource;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
@@ -106,6 +107,35 @@ it('supports optional submission auth for guests and authenticated users', funct
 
     expect((string) $authResponse->json('data.submitted_by_type'))->toBe($user->getMorphClass());
     expect((string) $authResponse->json('data.submitted_by_id'))->toBe((string) $user->getKey());
+});
+
+it('supports configurable submitter resource serialization for submissions', function (): void {
+    config()->set('formforge.http.submission.auth', 'optional');
+    config()->set('formforge.http.resources.submitter', UserSummaryResource::class);
+
+    $key = 'submitter_resource_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')->required();
+
+    $user = User::query()->create([
+        'name' => 'Evan',
+    ]);
+
+    $submit = $this->actingAs($user)->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'name' => 'Member',
+    ]);
+
+    $submit
+        ->assertCreated()
+        ->assertJsonPath('data.submitted_by.id', $user->getKey())
+        ->assertJsonPath('data.submitted_by.name', 'Evan');
+
+    $this->getJson("/api/formforge/v1/forms/{$key}/responses")
+        ->assertOk()
+        ->assertJsonPath('data.data.0.submitted_by.id', $user->getKey())
+        ->assertJsonPath('data.data.0.submitted_by.name', 'Evan');
 });
 
 it('allows per-form submission auth override to public', function (): void {
@@ -334,6 +364,110 @@ it('lists forms through paginated management endpoint', function (): void {
         ]);
 });
 
+it('lists form responses through paginated management endpoint', function (): void {
+    $key = 'responses_http_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')->required()
+        ->email('email')->required();
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'name' => 'A',
+        'email' => 'a@example.com',
+    ])->assertCreated();
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'name' => 'B',
+        'email' => 'b@example.com',
+    ])->assertCreated();
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'name' => 'C',
+        'email' => 'c@example.com',
+    ])->assertCreated();
+
+    $this->getJson("/api/formforge/v1/forms/{$key}/responses?per_page=2")
+        ->assertOk()
+        ->assertJsonCount(2, 'data.data')
+        ->assertJsonPath('meta.current_page', 1)
+        ->assertJsonPath('meta.per_page', 2)
+        ->assertJsonPath('meta.total', 3)
+        ->assertJsonStructure([
+            'data' => [
+                'data' => [
+                    [
+                        'id',
+                        'form_key',
+                        'form_version',
+                        'payload',
+                        'files',
+                    ],
+                ],
+            ],
+            'meta' => [
+                'current_page',
+                'from',
+                'last_page',
+                'path',
+                'per_page',
+                'to',
+                'total',
+            ],
+            'links' => [
+                'first',
+                'last',
+                'prev',
+                'next',
+            ],
+        ]);
+});
+
+it('returns one form response through management endpoint', function (): void {
+    $key = 'response_show_http_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')->required();
+
+    $submit = $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'name' => 'One',
+    ])->assertCreated();
+
+    $submissionId = (int) $submit->json('data.id');
+
+    $this->getJson("/api/formforge/v1/forms/{$key}/responses/{$submissionId}")
+        ->assertOk()
+        ->assertJsonPath('data.id', $submissionId)
+        ->assertJsonPath('data.form_key', $key)
+        ->assertJsonPath('data.payload.name', 'One');
+});
+
+it('deletes one form response through management endpoint', function (): void {
+    $key = 'response_delete_http_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')->required();
+
+    $submit = $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'name' => 'To Delete',
+    ])->assertCreated();
+
+    $submissionId = (int) $submit->json('data.id');
+
+    $this->deleteJson("/api/formforge/v1/forms/{$key}/responses/{$submissionId}")
+        ->assertOk()
+        ->assertJsonPath('data.form_key', $key)
+        ->assertJsonPath('data.submission_id', $submissionId)
+        ->assertJsonPath('data.deleted', true);
+
+    $this->assertDatabaseMissing('formforge_submissions', [
+        'id' => $submissionId,
+        'form_key' => $key,
+    ]);
+});
+
 it('creates a seeded draft form with default page and short_text field when empty', function (): void {
     $response = $this->postJson('/api/formforge/v1/forms', [
         'title' => 'Empty Draft',
@@ -456,6 +590,70 @@ it('supports management ability authorization', function (): void {
         'title' => 'Allowed',
         'fields' => [['type' => 'text', 'name' => 'name']],
     ])->assertCreated();
+});
+
+it('supports management responses ability authorization', function (): void {
+    config()->set('formforge.http.management.auth', 'required');
+    config()->set('formforge.http.management.abilities.responses', 'formforge.responses');
+
+    Gate::define('formforge.responses', static fn (?User $user): bool => $user !== null && $user->name === 'allowed');
+
+    $key = 'responses_ability_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')->required();
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'name' => 'Alpha',
+    ])->assertCreated();
+
+    $this->getJson("/api/formforge/v1/forms/{$key}/responses")
+        ->assertUnauthorized();
+
+    $denied = User::query()->create(['name' => 'denied']);
+
+    $this->actingAs($denied)->getJson("/api/formforge/v1/forms/{$key}/responses")
+        ->assertForbidden();
+
+    $allowed = User::query()->create(['name' => 'allowed']);
+
+    $this->actingAs($allowed)->getJson("/api/formforge/v1/forms/{$key}/responses")
+        ->assertOk()
+        ->assertJsonPath('meta.total', 1);
+});
+
+it('supports management response delete ability authorization', function (): void {
+    config()->set('formforge.http.management.auth', 'required');
+    config()->set('formforge.http.management.abilities.response_delete', 'formforge.response-delete');
+
+    Gate::define('formforge.response-delete', static fn (?User $user): bool => $user !== null && $user->name === 'allowed');
+
+    $key = 'responses_delete_ability_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')->required();
+
+    $submit = $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'name' => 'Alpha',
+    ])->assertCreated();
+
+    $submissionId = (int) $submit->json('data.id');
+
+    $this->deleteJson("/api/formforge/v1/forms/{$key}/responses/{$submissionId}")
+        ->assertUnauthorized();
+
+    $denied = User::query()->create(['name' => 'denied']);
+
+    $this->actingAs($denied)->deleteJson("/api/formforge/v1/forms/{$key}/responses/{$submissionId}")
+        ->assertForbidden();
+
+    $allowed = User::query()->create(['name' => 'allowed']);
+
+    $this->actingAs($allowed)->deleteJson("/api/formforge/v1/forms/{$key}/responses/{$submissionId}")
+        ->assertOk()
+        ->assertJsonPath('data.deleted', true);
 });
 
 it('keeps deleted forms readable through revisions endpoint for admin flows', function (): void {

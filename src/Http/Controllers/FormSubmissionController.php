@@ -8,6 +8,7 @@ use EvanSchleret\FormForge\Exceptions\FormForgeException;
 use EvanSchleret\FormForge\Exceptions\FormNotFoundException;
 use EvanSchleret\FormForge\FormInstance;
 use EvanSchleret\FormForge\FormManager;
+use EvanSchleret\FormForge\Http\Resources\SubmissionHttpResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -15,7 +16,7 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class FormSubmissionController
 {
-    public function submitLatest(Request $request, FormManager $forms, string $key): JsonResponse
+    public function submitLatest(Request $request, FormManager $forms, SubmissionHttpResource $resources, string $key): JsonResponse
     {
         $version = $request->input('version');
 
@@ -23,15 +24,21 @@ class FormSubmissionController
             $version = null;
         }
 
-        return $this->submit($request, $forms, $key, $version);
+        return $this->submit($request, $forms, $resources, $key, $version);
     }
 
-    public function submitVersion(Request $request, FormManager $forms, string $key, string $version): JsonResponse
+    public function submitVersion(Request $request, FormManager $forms, SubmissionHttpResource $resources, string $key, string $version): JsonResponse
     {
-        return $this->submit($request, $forms, $key, $version);
+        return $this->submit($request, $forms, $resources, $key, $version);
     }
 
-    private function submit(Request $request, FormManager $forms, string $key, ?string $version): JsonResponse
+    private function submit(
+        Request $request,
+        FormManager $forms,
+        SubmissionHttpResource $resources,
+        string $key,
+        ?string $version,
+    ): JsonResponse
     {
         try {
             $form = $request->attributes->get('formforge.form');
@@ -61,7 +68,7 @@ class FormSubmissionController
         }
 
         return response()->json([
-            'data' => $submission->toArray(),
+            'data' => $resources->toArray($submission, $request),
         ], 201);
     }
 

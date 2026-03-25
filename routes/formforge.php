@@ -78,4 +78,16 @@ Route::prefix($prefix)
         Route::middleware('formforge.endpoint:management,diff')->group(static function (): void {
             Route::get('/forms/{key}/diff/{fromVersion}/{toVersion}', [FormManagementController::class, 'diff']);
         });
+
+        Route::middleware('formforge.endpoint:management,responses')->group(static function (): void {
+            Route::get('/forms/{key}/responses', [FormManagementController::class, 'responses']);
+        });
+
+        Route::middleware('formforge.endpoint:management,response')->group(static function (): void {
+            Route::get('/forms/{key}/responses/{submissionId}', [FormManagementController::class, 'response']);
+        });
+
+        Route::middleware('formforge.endpoint:management,response_delete')->group(static function (): void {
+            Route::delete('/forms/{key}/responses/{submissionId}', [FormManagementController::class, 'deleteResponse']);
+        });
     });

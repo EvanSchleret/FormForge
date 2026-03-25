@@ -377,6 +377,58 @@ it('scaffolds a submission automation class with make command', function (): voi
     expect($content)->toContain('public function handle(FormSubmission $submission): void');
 });
 
+it('merges published config with latest defaults without losing project overrides', function (): void {
+    $configPath = config_path('formforge.php');
+    File::ensureDirectoryExists(dirname($configPath));
+
+    $original = File::exists($configPath) ? (string) File::get($configPath) : null;
+
+    try {
+        File::put($configPath, <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+return [
+    'forms' => [
+        'default_category' => 'tenant-custom',
+    ],
+    'http' => [
+        'prefix' => 'api/custom-formforge/v1',
+    ],
+];
+PHP);
+
+        $this->artisan('formforge:install:merge --skip-migrations --no-backup')
+            ->assertExitCode(0);
+
+        $merged = (static function (string $path): mixed {
+            return require $path;
+        })($configPath);
+
+        expect($merged)->toBeArray();
+        expect($merged['forms']['default_category'])->toBe('tenant-custom');
+        expect($merged['http']['prefix'])->toBe('api/custom-formforge/v1');
+        expect($merged['http']['resources']['submission'] ?? null)->toBeNull();
+        expect($merged['http']['resources']['submitter'] ?? null)->toBeNull();
+        expect($merged['http']['middleware'])->toContain('api');
+
+        $content = (string) File::get($configPath);
+
+        expect($content)->toContain('| Database');
+        expect($content)->toContain('return [');
+        expect($content)->toContain("'prefix' => 'api/custom-formforge/v1'");
+        expect($content)->not->toContain('Existing Project Overrides (Merged)');
+        expect($content)->not->toContain('$config = [');
+    } finally {
+        if ($original === null) {
+            File::delete($configPath);
+        } else {
+            File::put($configPath, $original);
+        }
+    }
+});
+
 it('cleans up expired staged upload tokens and temporary files', function (): void {
     Storage::fake('local');
 

@@ -162,6 +162,14 @@ return [
         'enabled' => true,
         'prefix' => 'api/formforge/v1',
         'middleware' => ['api'],
+        'resources' => [
+            // Optional JsonResource class for submission payloads.
+            // Example: App\Http\Resources\FormForgeSubmissionResource::class
+            'submission' => null,
+            // Optional JsonResource class for submitted_by relation.
+            // Example: App\Http\Resources\UserResource::class
+            'submitter' => null,
+        ],
         'idempotency' => [
             'ttl_minutes' => env('FORMFORGE_HTTP_IDEMPOTENCY_TTL', 1440),
         ],
@@ -212,6 +220,9 @@ return [
                 'delete' => null,
                 'revisions' => null,
                 'diff' => null,
+                'responses' => null,
+                'response' => null,
+                'response_delete' => null,
                 'drafts' => null,
             ],
         ],

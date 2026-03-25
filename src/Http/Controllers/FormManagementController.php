@@ -7,8 +7,11 @@ namespace EvanSchleret\FormForge\Http\Controllers;
 use EvanSchleret\FormForge\Exceptions\FormConflictException;
 use EvanSchleret\FormForge\Exceptions\FormForgeException;
 use EvanSchleret\FormForge\Exceptions\FormNotFoundException;
+use EvanSchleret\FormForge\Http\Resources\SubmissionHttpResource;
 use EvanSchleret\FormForge\Management\FormMutationService;
 use EvanSchleret\FormForge\Management\IdempotencyService;
+use EvanSchleret\FormForge\Persistence\FormDefinitionRepository;
+use EvanSchleret\FormForge\Submissions\SubmissionReadService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -17,6 +20,104 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class FormManagementController
 {
+    public function responses(
+        Request $request,
+        FormDefinitionRepository $repository,
+        SubmissionReadService $submissions,
+        SubmissionHttpResource $resources,
+        string $key,
+    ): JsonResponse {
+        if (! $repository->keyExists($key, true) && ! $submissions->existsForForm($key)) {
+            throw new NotFoundHttpException("Form [{$key}] not found.");
+        }
+
+        $perPage = $this->boundedInt($request->query('per_page', 15), 1, 100, 15);
+        $filters = [
+            'version' => is_string($request->query('version')) ? trim((string) $request->query('version')) : null,
+            'is_test' => $request->query('is_test'),
+        ];
+
+        $paginator = $submissions->paginateForForm($key, $perPage, $filters);
+        $paginator->appends($request->query());
+
+        return response()->json([
+            'data' => [
+                'data' => $resources->collection($paginator->items(), $request),
+            ],
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'from' => $paginator->firstItem(),
+                'last_page' => $paginator->lastPage(),
+                'path' => $paginator->path(),
+                'per_page' => $paginator->perPage(),
+                'to' => $paginator->lastItem(),
+                'total' => $paginator->total(),
+            ],
+            'links' => [
+                'first' => $paginator->url(1),
+                'last' => $paginator->url($paginator->lastPage()),
+                'prev' => $paginator->previousPageUrl(),
+                'next' => $paginator->nextPageUrl(),
+            ],
+        ]);
+    }
+
+    public function response(
+        Request $request,
+        FormDefinitionRepository $repository,
+        SubmissionReadService $submissions,
+        SubmissionHttpResource $resources,
+        string $key,
+        string $submissionId,
+    ): JsonResponse {
+        if (! $repository->keyExists($key, true) && ! $submissions->existsForForm($key)) {
+            throw new NotFoundHttpException("Form [{$key}] not found.");
+        }
+
+        if (! ctype_digit($submissionId)) {
+            throw new NotFoundHttpException("Submission [{$submissionId}] not found for form [{$key}].");
+        }
+
+        $submission = $submissions->findForForm($key, (int) $submissionId);
+
+        if ($submission === null) {
+            throw new NotFoundHttpException("Submission [{$submissionId}] not found for form [{$key}].");
+        }
+
+        return response()->json([
+            'data' => $resources->toArray($submission, $request),
+        ]);
+    }
+
+    public function deleteResponse(
+        FormDefinitionRepository $repository,
+        SubmissionReadService $submissions,
+        string $key,
+        string $submissionId,
+    ): JsonResponse {
+        if (! $repository->keyExists($key, true) && ! $submissions->existsForForm($key)) {
+            throw new NotFoundHttpException("Form [{$key}] not found.");
+        }
+
+        if (! ctype_digit($submissionId)) {
+            throw new NotFoundHttpException("Submission [{$submissionId}] not found for form [{$key}].");
+        }
+
+        $deleted = $submissions->deleteForForm($key, (int) $submissionId);
+
+        if (! $deleted) {
+            throw new NotFoundHttpException("Submission [{$submissionId}] not found for form [{$key}].");
+        }
+
+        return response()->json([
+            'data' => [
+                'form_key' => $key,
+                'submission_id' => (int) $submissionId,
+                'deleted' => true,
+            ],
+        ]);
+    }
+
     public function index(Request $request, FormMutationService $mutations): JsonResponse
     {
         $perPage = $this->boundedInt($request->query('per_page', 15), 1, 100, 15);
