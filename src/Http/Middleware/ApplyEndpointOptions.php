@@ -10,6 +10,7 @@ use EvanSchleret\FormForge\FormManager;
 use EvanSchleret\FormForge\Exceptions\FormNotFoundException;
 use EvanSchleret\FormForge\Http\EndpointRequestGuard;
 use EvanSchleret\FormForge\Http\HttpOptionsResolver;
+use EvanSchleret\FormForge\Ownership\OwnershipManager;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
@@ -19,6 +20,7 @@ class ApplyEndpointOptions
         private readonly FormManager $forms,
         private readonly HttpOptionsResolver $resolver,
         private readonly EndpointRequestGuard $requestGuard,
+        private readonly OwnershipManager $ownership,
     ) {
     }
 
@@ -38,7 +40,16 @@ class ApplyEndpointOptions
             $request->attributes->set('formforge.endpoint.action', trim($action));
         }
 
+        $ownership = $this->ownership->resolve($request, $endpoint, $action);
+        $request->attributes->set('formforge.ownership', $ownership?->toArray());
+        $request->attributes->set('formforge.ownership.reference', $ownership);
+        $this->ownership->assertRequestAuthorized($request, $endpoint, $action, $ownership);
+
         $key = trim((string) $request->route('key'));
+
+        if ($key === '') {
+            $key = trim((string) $request->route('categoryKey'));
+        }
 
         if ($key !== '') {
             $request->attributes->set('formforge.authorization.arguments', [$key]);

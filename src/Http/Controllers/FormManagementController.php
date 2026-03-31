@@ -8,8 +8,10 @@ use EvanSchleret\FormForge\Exceptions\FormConflictException;
 use EvanSchleret\FormForge\Exceptions\FormForgeException;
 use EvanSchleret\FormForge\Exceptions\FormNotFoundException;
 use EvanSchleret\FormForge\Http\Resources\SubmissionHttpResource;
+use EvanSchleret\FormForge\Management\FormCategoryService;
 use EvanSchleret\FormForge\Management\FormMutationService;
 use EvanSchleret\FormForge\Management\IdempotencyService;
+use EvanSchleret\FormForge\Ownership\OwnershipReference;
 use EvanSchleret\FormForge\Persistence\FormDefinitionRepository;
 use EvanSchleret\FormForge\Submissions\SubmissionReadService;
 use Illuminate\Http\JsonResponse;
@@ -20,6 +22,113 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class FormManagementController
 {
+    public function categories(Request $request, FormCategoryService $categories): JsonResponse
+    {
+        $owner = $this->ownershipFromRequest($request);
+        $perPage = $this->boundedInt($request->query('per_page', 15), 1, 100, 15);
+        $filters = [
+            'search' => is_string($request->query('search')) ? trim((string) $request->query('search')) : null,
+            'is_active' => $request->query('is_active'),
+        ];
+
+        $paginator = $categories->paginate($perPage, $filters, $owner);
+        $paginator->appends($request->query());
+        $rows = $paginator->getCollection()
+            ->map(fn ($category): array => $categories->toArray($category))
+            ->values()
+            ->all();
+
+        return response()->json([
+            'data' => [
+                'data' => $rows,
+            ],
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'from' => $paginator->firstItem(),
+                'last_page' => $paginator->lastPage(),
+                'path' => $paginator->path(),
+                'per_page' => $paginator->perPage(),
+                'to' => $paginator->lastItem(),
+                'total' => $paginator->total(),
+            ],
+            'links' => [
+                'first' => $paginator->url(1),
+                'last' => $paginator->url($paginator->lastPage()),
+                'prev' => $paginator->previousPageUrl(),
+                'next' => $paginator->nextPageUrl(),
+            ],
+        ]);
+    }
+
+    public function category(Request $request, FormCategoryService $categories, string $categoryKey): JsonResponse
+    {
+        $category = $categories->findByKey($categoryKey, $this->ownershipFromRequest($request));
+
+        if ($category === null) {
+            throw new NotFoundHttpException("Category [{$categoryKey}] not found.");
+        }
+
+        return response()->json([
+            'data' => $categories->toArray($category),
+        ]);
+    }
+
+    public function createCategory(Request $request, FormCategoryService $categories): JsonResponse
+    {
+        try {
+            $category = $categories->create($request->all(), $this->ownershipFromRequest($request));
+        } catch (FormConflictException $exception) {
+            throw new ConflictHttpException($exception->getMessage(), $exception);
+        } catch (FormForgeException $exception) {
+            throw ValidationException::withMessages([
+                'category' => [$exception->getMessage()],
+            ]);
+        }
+
+        return response()->json([
+            'data' => $categories->toArray($category),
+        ], 201);
+    }
+
+    public function updateCategory(Request $request, FormCategoryService $categories, string $categoryKey): JsonResponse
+    {
+        try {
+            $category = $categories->update($categoryKey, $request->all(), $this->ownershipFromRequest($request));
+        } catch (FormForgeException $exception) {
+            if (str_contains($exception->getMessage(), 'not found')) {
+                throw new NotFoundHttpException($exception->getMessage(), $exception);
+            }
+
+            throw ValidationException::withMessages([
+                'category' => [$exception->getMessage()],
+            ]);
+        }
+
+        return response()->json([
+            'data' => $categories->toArray($category),
+        ]);
+    }
+
+    public function deleteCategory(Request $request, FormCategoryService $categories, string $categoryKey): JsonResponse
+    {
+        try {
+            $deleted = $categories->delete($categoryKey, $this->ownershipFromRequest($request));
+        } catch (FormConflictException $exception) {
+            throw new ConflictHttpException($exception->getMessage(), $exception);
+        }
+
+        if (! $deleted) {
+            throw new NotFoundHttpException("Category [{$categoryKey}] not found.");
+        }
+
+        return response()->json([
+            'data' => [
+                'key' => $categoryKey,
+                'deleted' => true,
+            ],
+        ]);
+    }
+
     public function responses(
         Request $request,
         FormDefinitionRepository $repository,
@@ -27,7 +136,12 @@ class FormManagementController
         SubmissionHttpResource $resources,
         string $key,
     ): JsonResponse {
-        if (! $repository->keyExists($key, true) && ! $submissions->existsForForm($key)) {
+        $owner = $this->ownershipFromRequest($request);
+
+        $knownForm = $repository->keyExists($key, true, $owner);
+        $knownBySubmissionOnly = $owner === null && $submissions->existsForForm($key);
+
+        if (! $knownForm && ! $knownBySubmissionOnly) {
             throw new NotFoundHttpException("Form [{$key}] not found.");
         }
 
@@ -70,7 +184,12 @@ class FormManagementController
         string $key,
         string $submissionUuid,
     ): JsonResponse {
-        if (! $repository->keyExists($key, true) && ! $submissions->existsForForm($key)) {
+        $owner = $this->ownershipFromRequest($request);
+
+        $knownForm = $repository->keyExists($key, true, $owner);
+        $knownBySubmissionOnly = $owner === null && $submissions->existsForForm($key);
+
+        if (! $knownForm && ! $knownBySubmissionOnly) {
             throw new NotFoundHttpException("Form [{$key}] not found.");
         }
 
@@ -87,12 +206,18 @@ class FormManagementController
     }
 
     public function deleteResponse(
+        Request $request,
         FormDefinitionRepository $repository,
         SubmissionReadService $submissions,
         string $key,
         string $submissionUuid,
     ): JsonResponse {
-        if (! $repository->keyExists($key, true) && ! $submissions->existsForForm($key)) {
+        $owner = $this->ownershipFromRequest($request);
+
+        $knownForm = $repository->keyExists($key, true, $owner);
+        $knownBySubmissionOnly = $owner === null && $submissions->existsForForm($key);
+
+        if (! $knownForm && ! $knownBySubmissionOnly) {
             throw new NotFoundHttpException("Form [{$key}] not found.");
         }
 
@@ -114,13 +239,14 @@ class FormManagementController
 
     public function index(Request $request, FormMutationService $mutations): JsonResponse
     {
+        $owner = $this->ownershipFromRequest($request);
         $perPage = $this->boundedInt($request->query('per_page', 15), 1, 100, 15);
         $filters = [
             'category' => is_string($request->query('category')) ? trim((string) $request->query('category')) : null,
             'is_published' => $request->query('is_published'),
         ];
 
-        $paginator = $mutations->paginateActive($perPage, $filters);
+        $paginator = $mutations->paginateActive($perPage, $filters, $owner);
         $paginator->appends($request->query());
 
         return response()->json([
@@ -157,7 +283,7 @@ class FormManagementController
                 return response()->json($replay['body'], (int) $replay['status_code']);
             }
 
-            $definition = $mutations->create($payload, $request->user());
+            $definition = $mutations->create($payload, $request->user(), $this->ownershipFromRequest($request));
             $data = $mutations->toDetailArray($definition);
             $body = [
                 'data' => $data,
@@ -202,7 +328,7 @@ class FormManagementController
                 return response()->json($replay['body'], (int) $replay['status_code']);
             }
 
-            $definition = $mutations->patch($key, $payload, $request->user());
+            $definition = $mutations->patch($key, $payload, $request->user(), $this->ownershipFromRequest($request));
             $data = $mutations->toDetailArray($definition);
             $body = [
                 'data' => $data,
@@ -266,7 +392,7 @@ class FormManagementController
     public function delete(Request $request, FormMutationService $mutations, string $key): JsonResponse
     {
         try {
-            $deleted = $mutations->softDelete($key, $request->user());
+            $deleted = $mutations->softDelete($key, $request->user(), $this->ownershipFromRequest($request));
         } catch (FormNotFoundException $exception) {
             throw new NotFoundHttpException($exception->getMessage(), $exception);
         }
@@ -284,7 +410,7 @@ class FormManagementController
         $includeDeleted = $this->toBool($request->query('include_deleted', false));
 
         try {
-            $rows = $mutations->revisions($key, $includeDeleted);
+            $rows = $mutations->revisions($key, $includeDeleted, $this->ownershipFromRequest($request));
         } catch (FormNotFoundException $exception) {
             throw new NotFoundHttpException($exception->getMessage(), $exception);
         }
@@ -307,7 +433,7 @@ class FormManagementController
         $includeDeleted = $this->toBool($request->query('include_deleted', false));
 
         try {
-            $diff = $mutations->diff($key, $fromVersion, $toVersion, $includeDeleted);
+            $diff = $mutations->diff($key, $fromVersion, $toVersion, $includeDeleted, $this->ownershipFromRequest($request));
         } catch (FormNotFoundException $exception) {
             throw new NotFoundHttpException($exception->getMessage(), $exception);
         }
@@ -336,8 +462,8 @@ class FormManagementController
             }
 
             $definition = $target === 'publish'
-                ? $mutations->publish($key, $request->user())
-                : $mutations->unpublish($key, $request->user());
+                ? $mutations->publish($key, $request->user(), $this->ownershipFromRequest($request))
+                : $mutations->unpublish($key, $request->user(), $this->ownershipFromRequest($request));
 
             $data = $mutations->toDetailArray($definition);
             $body = [
@@ -420,5 +546,12 @@ class FormManagementController
         }
 
         return $candidate;
+    }
+
+    private function ownershipFromRequest(Request $request): ?OwnershipReference
+    {
+        $candidate = $request->attributes->get('formforge.ownership.reference');
+
+        return $candidate instanceof OwnershipReference ? $candidate : null;
     }
 }

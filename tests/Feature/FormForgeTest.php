@@ -12,6 +12,7 @@ use EvanSchleret\FormForge\Models\StagedUpload;
 use EvanSchleret\FormForge\Automations\SubmissionAutomationDispatcher;
 use EvanSchleret\FormForge\Registry\FormRegistry;
 use EvanSchleret\FormForge\Tests\Fixtures\CreateMembershipFromSubmissionAutomation;
+use EvanSchleret\FormForge\Tests\Fixtures\Models\CustomFormSubmission;
 use EvanSchleret\FormForge\Tests\Fixtures\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
@@ -260,6 +261,23 @@ it('persists polymorphic submitter columns', function (): void {
 
     expect($submission->submitted_by_type)->toBe($user->getMorphClass());
     expect((string) $submission->submitted_by_id)->toBe((string) $user->getKey());
+});
+
+it('supports overriding package models via config', function (): void {
+    config()->set('formforge.models.form_submission', CustomFormSubmission::class);
+
+    $key = 'custom_model_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')->required();
+
+    $submission = Form::get($key, '1')->submit([
+        'name' => 'Evan',
+    ]);
+
+    expect($submission)->toBeInstanceOf(CustomFormSubmission::class);
+    expect(($submission->meta['custom_model'] ?? false))->toBeTrue();
 });
 
 it('runs code-first submission automations after form submit', function (): void {

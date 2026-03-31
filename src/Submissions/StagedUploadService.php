@@ -6,6 +6,7 @@ namespace EvanSchleret\FormForge\Submissions;
 
 use EvanSchleret\FormForge\Exceptions\FormForgeException;
 use EvanSchleret\FormForge\Models\StagedUpload;
+use EvanSchleret\FormForge\Support\ModelClassResolver;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
@@ -18,7 +19,7 @@ class StagedUploadService
     {
         $chunk = max(1, $chunk);
 
-        $query = StagedUpload::query()
+        $query = ModelClassResolver::stagedUpload()::query()
             ->whereNotNull('expires_at')
             ->where('expires_at', '<=', Carbon::now());
 
@@ -100,7 +101,7 @@ class StagedUploadService
         $ttl = (int) config('formforge.uploads.temporary_ttl_minutes', 1440);
         $expiresAt = $ttl > 0 ? Carbon::now()->addMinutes($ttl) : null;
 
-        StagedUpload::query()->create([
+        ModelClassResolver::stagedUpload()::query()->create([
             'token' => $token,
             'form_key' => (string) ($form['key'] ?? ''),
             'form_version' => (string) ($form['version'] ?? ''),
@@ -146,7 +147,7 @@ class StagedUploadService
             throw new FormForgeException('Upload token cannot be empty.');
         }
 
-        $upload = StagedUpload::query()
+        $upload = ModelClassResolver::stagedUpload()::query()
             ->byToken($candidate)
             ->available()
             ->lockForUpdate()

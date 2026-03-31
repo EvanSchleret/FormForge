@@ -17,6 +17,61 @@
   <img src="https://img.shields.io/badge/Laravel-12.x%20%7C%2013.x-FF2D20" alt="Laravel 12.x | 13.x" />
 </p>
 
+## Read this first
+
+This package is feature-rich and can feel heavy at first glance.  
+You do not need every feature on day one.
+
+Start with one integration mode and add the rest only when needed:
+
+1. **Code-first only**: use the `Form` facade and skip the HTTP API
+2. **Built-in HTTP API**: use the package routes directly
+3. **Built-in HTTP API with custom behavior**: override package controllers without rewriting business logic
+
+Online documentation with deeper guides is planned soon.  
+For now, this README is intentionally structured to let you ship quickly first, then go deeper.
+
+## Fast path (5 minutes)
+
+1. Install and publish:
+
+```bash
+composer require evanschleret/formforge
+php artisan formforge:install
+php artisan migrate
+```
+
+2. Define your first form:
+
+```php
+<?php
+
+declare(strict_types=1);
+
+use EvanSchleret\FormForge\Facades\Form;
+
+Form::define('contact')
+    ->title('Contact')
+    ->version('1')
+    ->text('name')->required()
+    ->email('email')->required()
+    ->textarea('message')->required();
+
+Form::sync();
+```
+
+3. Submit server-side:
+
+```php
+$submission = Form::get('contact')->submit([
+    'name' => 'Evan',
+    'email' => 'evan@example.com',
+    'message' => 'Hello',
+]);
+```
+
+At this point, FormForge is already usable without exposing any package HTTP route.
+
 ## Why FormForge
 
 FormForge gives you one backend source of truth for:
@@ -27,6 +82,30 @@ FormForge gives you one backend source of truth for:
 - strict payload validation on effective (condition-resolved) schema
 - configurable endpoint security (`auth`, `guard`, `middleware`, `ability`)
 - file workflows for multipart and JSON-first clients
+
+## Integration modes
+
+Choose one mode first. You can move to another later.
+
+### Mode A: facade only (simplest)
+
+- Define forms in code
+- Resolve schema from PHP
+- Submit from PHP
+- Do not expose package HTTP routes
+
+### Mode B: package HTTP API
+
+- Use routes under `formforge.http.prefix`
+- Configure auth/guard/middleware/abilities per endpoint group
+- Use ownership resolver if you need owner-scoped management
+
+### Mode C: package HTTP API + custom controllers
+
+- Keep package routes and services
+- Override selected controller classes in config
+- Inject your tenant/community logic directly where you need it
+- Keep method signatures compatible with package controllers
 
 ## Requirements
 
@@ -82,7 +161,7 @@ Available options:
 - `--skip-migrations`: do not publish missing migrations during merge
 - `--no-backup`: skip backup generation for `config/formforge.php` before rewrite
 
-## Quick start
+## Quick start (code-first)
 
 ```php
 <?php
@@ -168,6 +247,94 @@ You can customize submission serialization with Laravel `JsonResource` classes:
 With `submitter`, submission payloads include a `submitted_by` key serialized through your resource.
 With `file_urls.enabled=true`, default submission resources enrich file metadata (in both `payload` and `files`) with signed temporary URLs when supported by the disk, with fallback to regular disk URLs.
 
+### Model overrides
+
+You can override package models through config.  
+Each custom model must extend the corresponding FormForge base model.
+
+```php
+'models' => [
+    'form_definition' => \App\Models\FormForge\FormDefinition::class,
+    'form_category' => \App\Models\FormForge\FormCategory::class,
+    'form_submission' => \App\Models\FormForge\FormSubmission::class,
+    'submission_file' => \App\Models\FormForge\SubmissionFile::class,
+    'staged_upload' => \App\Models\FormForge\StagedUpload::class,
+    'idempotency_key' => \App\Models\FormForge\IdempotencyKey::class,
+    'form_draft' => \App\Models\FormForge\FormDraft::class,
+    'submission_automation_run' => \App\Models\FormForge\SubmissionAutomationRun::class,
+],
+```
+
+### Optional ownership
+
+FormForge can scope forms and categories to a polymorphic owner (`owner_type`, `owner_id`).
+
+```php
+'ownership' => [
+    'enabled' => true,
+    'required' => true,
+    'endpoints' => ['management'],
+    'resolver' => \App\FormForge\Ownership\FormForgeOwnershipResolver::class,
+    'authorizer' => \App\FormForge\Ownership\FormForgeOwnershipAuthorizer::class,
+],
+```
+
+Contracts:
+
+- `resolver` must implement `EvanSchleret\FormForge\Ownership\Contracts\ResolvesOwnership`
+- `authorizer` must implement `EvanSchleret\FormForge\Ownership\Contracts\AuthorizesOwnership`
+
+Resolver can return:
+
+- `null`
+- an Eloquent model (owner inferred from morph class + key)
+- `['type' => '...', 'id' => '...']`
+
+When ownership is enabled, management responses include `owner_type` and `owner_id` on forms and categories.
+
+### Override HTTP controllers
+
+If you need contextual API behavior (community, tenant, custom authorization flow), you can override package controllers while keeping all package services and response contracts.
+
+Each custom controller must extend the corresponding package controller.
+
+```php
+'http' => [
+    'controllers' => [
+        'schema' => \EvanSchleret\FormForge\Http\Controllers\FormSchemaController::class,
+        'submission' => \EvanSchleret\FormForge\Http\Controllers\FormSubmissionController::class,
+        'upload' => \EvanSchleret\FormForge\Http\Controllers\FormUploadController::class,
+        'resolve' => \EvanSchleret\FormForge\Http\Controllers\FormResolveController::class,
+        'draft' => \EvanSchleret\FormForge\Http\Controllers\FormDraftController::class,
+        'management' => \App\Http\Controllers\FormForge\CommunityFormManagementController::class,
+    ],
+],
+```
+
+Example:
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Http\Controllers\FormForge;
+
+use EvanSchleret\FormForge\Http\Controllers\FormManagementController;
+use EvanSchleret\FormForge\Management\FormMutationService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+
+final class CommunityFormManagementController extends FormManagementController
+{
+    public function index(Request $request, FormMutationService $mutations): JsonResponse
+    {
+        // Add your community context logic here, then delegate or customize.
+        return parent::index($request, $mutations);
+    }
+}
+```
+
 ### Schema endpoints
 
 - `GET /forms/{key}`
@@ -208,6 +375,11 @@ Draft behavior:
 ### Management endpoints
 
 - `GET /forms` (paginated list of active forms, payload in `data.data`)
+- `GET /categories` (paginated list of categories)
+- `GET /categories/{categoryKey}` (single category detail)
+- `POST /categories` (create category)
+- `PATCH /categories/{categoryKey}` (update category metadata/state)
+- `DELETE /categories/{categoryKey}` (delete category when not linked to forms and not `is_system`)
 - `POST /forms` (create revision 1, UUID key auto-generated)
 - `PATCH /forms/{key}` (creates a new draft revision)
 - `POST /forms/{key}/publish` (creates a new published revision)
@@ -219,12 +391,18 @@ Draft behavior:
 - `GET /forms/{key}/responses/{submissionUuid}` (single submission detail)
 - `DELETE /forms/{key}/responses/{submissionUuid}` (delete one submission)
 
+Category key rule:
+
+- `categoryKey` is always a UUID generated by FormForge (never derived from the category name)
+- categories support `is_system`; system categories cannot be deleted
+
 Creation rule:
 
 - `POST /forms` requires only `title`
 - if both `fields` and `pages` are omitted (or empty), FormForge seeds:
   - one default page
   - one default field (`type: text`, `name: short_text`)
+- `PATCH /forms/{key}` with `"category": null` clears the form category (sets it to uncategorized)
 
 ## Publishability
 
@@ -262,6 +440,11 @@ Example:
         'abilities' => [
             'create' => 'formforge.create',
             'index' => 'formforge.index',
+            'categories' => 'formforge.categories',
+            'category' => 'formforge.category',
+            'category_create' => 'formforge.category-create',
+            'category_update' => 'formforge.category-update',
+            'category_delete' => 'formforge.category-delete',
             'update' => 'formforge.update',
             'publish' => 'formforge.publish',
             'unpublish' => 'formforge.unpublish',

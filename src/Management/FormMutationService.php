@@ -7,8 +7,12 @@ namespace EvanSchleret\FormForge\Management;
 use EvanSchleret\FormForge\Definition\FormBlueprint;
 use EvanSchleret\FormForge\Exceptions\FormForgeException;
 use EvanSchleret\FormForge\Exceptions\FormNotFoundException;
+use EvanSchleret\FormForge\Models\FormCategory;
 use EvanSchleret\FormForge\Models\FormDefinition;
+use EvanSchleret\FormForge\Ownership\OwnershipManager;
+use EvanSchleret\FormForge\Ownership\OwnershipReference;
 use EvanSchleret\FormForge\Persistence\FormDefinitionRepository;
+use EvanSchleret\FormForge\Support\ModelClassResolver;
 use EvanSchleret\FormForge\Support\FormSchemaLayout;
 use EvanSchleret\FormForge\Support\Schema;
 use Illuminate\Database\Eloquent\Model;
@@ -21,17 +25,21 @@ class FormMutationService
 {
     public function __construct(
         private readonly FormDefinitionRepository $repository,
+        private readonly FormCategoryService $categories,
+        private readonly OwnershipManager $ownership,
     ) {
     }
 
-    public function create(array $input, ?Model $actor = null): FormDefinition
+    public function create(array $input, ?Model $actor = null, ?OwnershipReference $owner = null): FormDefinition
     {
         $title = trim((string) ($input['title'] ?? ''));
         $fields = $input['fields'] ?? [];
         $pages = $input['pages'] ?? [];
         $conditions = $input['conditions'] ?? [];
         $drafts = $input['drafts'] ?? [];
-        $category = $this->normalizedOptionalString($input['category'] ?? null);
+        $categoryModel = array_key_exists('category', $input)
+            ? $this->resolveOptionalCategoryModel($input['category'], $owner)
+            : $this->categories->ensureForForms(null, $owner);
         $api = $this->normalizedArray($input['api'] ?? []);
         $meta = $this->normalizedArray($input['meta'] ?? []);
         $key = $this->buildGeneratedKey();
@@ -46,12 +54,12 @@ class FormMutationService
             pages: $pages,
             conditions: $conditions,
             drafts: $drafts,
-            category: $category,
+            category: $categoryModel?->key,
             api: $api,
             published: false,
         );
 
-        return DB::transaction(function () use ($key, $schema, $versionNumber, $formUuid, $actor, $meta): FormDefinition {
+        return DB::transaction(function () use ($key, $schema, $versionNumber, $formUuid, $actor, $meta, $categoryModel, $owner): FormDefinition {
             return $this->createRevision(
                 key: $key,
                 schema: $schema,
@@ -60,15 +68,18 @@ class FormMutationService
                 published: false,
                 actor: $actor,
                 meta: $meta,
+                category: $categoryModel,
+                owner: $owner,
             );
         });
     }
 
-    public function patch(string $key, array $input, ?Model $actor = null): FormDefinition
+    public function patch(string $key, array $input, ?Model $actor = null, ?OwnershipReference $owner = null): FormDefinition
     {
-        $latest = $this->activeOrFail($key);
+        $latest = $this->activeOrFail($key, $owner);
         $currentSchema = is_array($latest->schema) ? $latest->schema : [];
-        $nextVersion = $this->repository->nextVersionNumber($key, true);
+        $effectiveOwner = $owner ?? $this->ownership->fromModel($latest);
+        $nextVersion = $this->repository->nextVersionNumber($key, true, $effectiveOwner);
 
         $title = array_key_exists('title', $input)
             ? trim((string) $input['title'])
@@ -90,9 +101,9 @@ class FormMutationService
             ? $this->normalizedArray($input['drafts'])
             : $this->normalizedArray($currentSchema['drafts'] ?? []);
 
-        $category = array_key_exists('category', $input)
-            ? $this->normalizedOptionalString($input['category'])
-            : $this->normalizedOptionalString($currentSchema['category'] ?? null);
+        $categoryModel = array_key_exists('category', $input)
+            ? $this->resolveOptionalCategoryModel($input['category'], $effectiveOwner)
+            : $this->resolveCurrentCategoryModel($latest, $currentSchema, $effectiveOwner);
 
         $api = array_key_exists('api', $input)
             ? $this->normalizedArray($input['api'])
@@ -110,12 +121,12 @@ class FormMutationService
             pages: $pages,
             conditions: $conditions,
             drafts: $drafts,
-            category: $category,
+            category: $categoryModel?->key,
             api: $api,
             published: false,
         );
 
-        return DB::transaction(function () use ($latest, $schema, $nextVersion, $actor, $meta): FormDefinition {
+        return DB::transaction(function () use ($latest, $schema, $nextVersion, $actor, $meta, $categoryModel, $effectiveOwner): FormDefinition {
             return $this->createRevision(
                 key: (string) $latest->key,
                 schema: $schema,
@@ -124,13 +135,15 @@ class FormMutationService
                 published: false,
                 actor: $actor,
                 meta: $meta,
+                category: $categoryModel,
+                owner: $effectiveOwner,
             );
         });
     }
 
-    public function publish(string $key, ?Model $actor = null): FormDefinition
+    public function publish(string $key, ?Model $actor = null, ?OwnershipReference $owner = null): FormDefinition
     {
-        $latest = $this->activeOrFail($key);
+        $latest = $this->activeOrFail($key, $owner);
 
         if ((bool) $latest->is_published) {
             return $latest;
@@ -145,8 +158,10 @@ class FormMutationService
             throw new FormForgeException('Form cannot be published: title, at least one page, and one field are required.');
         }
 
-        $nextVersion = $this->repository->nextVersionNumber($key, true);
+        $effectiveOwner = $owner ?? $this->ownership->fromModel($latest);
+        $nextVersion = $this->repository->nextVersionNumber($key, true, $effectiveOwner);
 
+        $categoryModel = $this->resolveCurrentCategoryModel($latest, $currentSchema, $effectiveOwner);
         $schema = $this->normalizeSchema(
             key: (string) $latest->key,
             versionNumber: $nextVersion,
@@ -155,12 +170,12 @@ class FormMutationService
             pages: $pages,
             conditions: $this->normalizedArray($currentSchema['conditions'] ?? []),
             drafts: $this->normalizedArray($currentSchema['drafts'] ?? []),
-            category: $this->normalizedOptionalString($currentSchema['category'] ?? null),
+            category: $categoryModel?->key,
             api: $this->normalizedArray($currentSchema['api'] ?? []),
             published: true,
         );
 
-        return DB::transaction(function () use ($latest, $schema, $nextVersion, $actor): FormDefinition {
+        return DB::transaction(function () use ($latest, $schema, $nextVersion, $actor, $categoryModel, $effectiveOwner): FormDefinition {
             return $this->createRevision(
                 key: (string) $latest->key,
                 schema: $schema,
@@ -169,21 +184,25 @@ class FormMutationService
                 published: true,
                 actor: $actor,
                 meta: $this->normalizedArray($latest->meta ?? []),
+                category: $categoryModel,
+                owner: $effectiveOwner,
             );
         });
     }
 
-    public function unpublish(string $key, ?Model $actor = null): FormDefinition
+    public function unpublish(string $key, ?Model $actor = null, ?OwnershipReference $owner = null): FormDefinition
     {
-        $latest = $this->activeOrFail($key);
+        $latest = $this->activeOrFail($key, $owner);
 
         if (! (bool) $latest->is_published) {
             return $latest;
         }
 
         $currentSchema = is_array($latest->schema) ? $latest->schema : [];
-        $nextVersion = $this->repository->nextVersionNumber($key, true);
+        $effectiveOwner = $owner ?? $this->ownership->fromModel($latest);
+        $nextVersion = $this->repository->nextVersionNumber($key, true, $effectiveOwner);
 
+        $categoryModel = $this->resolveCurrentCategoryModel($latest, $currentSchema, $effectiveOwner);
         $schema = $this->normalizeSchema(
             key: (string) $latest->key,
             versionNumber: $nextVersion,
@@ -192,12 +211,12 @@ class FormMutationService
             pages: $this->normalizedArray($currentSchema['pages'] ?? []),
             conditions: $this->normalizedArray($currentSchema['conditions'] ?? []),
             drafts: $this->normalizedArray($currentSchema['drafts'] ?? []),
-            category: $this->normalizedOptionalString($currentSchema['category'] ?? null),
+            category: $categoryModel?->key,
             api: $this->normalizedArray($currentSchema['api'] ?? []),
             published: false,
         );
 
-        return DB::transaction(function () use ($latest, $schema, $nextVersion, $actor): FormDefinition {
+        return DB::transaction(function () use ($latest, $schema, $nextVersion, $actor, $categoryModel, $effectiveOwner): FormDefinition {
             return $this->createRevision(
                 key: (string) $latest->key,
                 schema: $schema,
@@ -206,13 +225,15 @@ class FormMutationService
                 published: false,
                 actor: $actor,
                 meta: $this->normalizedArray($latest->meta ?? []),
+                category: $categoryModel,
+                owner: $effectiveOwner,
             );
         });
     }
 
-    public function softDelete(string $key, ?Model $actor = null): int
+    public function softDelete(string $key, ?Model $actor = null, ?OwnershipReference $owner = null): int
     {
-        $definitions = $this->repository->byKey($key);
+        $definitions = $this->repository->byKey($key, false, $owner);
 
         if ($definitions->isEmpty()) {
             throw FormNotFoundException::forKey($key);
@@ -231,17 +252,18 @@ class FormMutationService
         }
 
         if ($updates !== []) {
-            FormDefinition::query()
-                ->where('key', $key)
-                ->update($updates);
+            $updateQuery = ModelClassResolver::formDefinition()::query()
+                ->where('key', $key);
+            $this->ownership->applyScope($updateQuery, $owner);
+            $updateQuery->update($updates);
         }
 
-        return $this->repository->softDeleteKey($key);
+        return $this->repository->softDeleteKey($key, $owner);
     }
 
-    public function revisions(string $key, bool $includeDeleted = true): array
+    public function revisions(string $key, bool $includeDeleted = true, ?OwnershipReference $owner = null): array
     {
-        $definitions = $this->repository->byKey($key, $includeDeleted);
+        $definitions = $this->repository->byKey($key, $includeDeleted, $owner);
 
         if ($definitions->isEmpty()) {
             throw FormNotFoundException::forKey($key);
@@ -253,10 +275,10 @@ class FormMutationService
             ->all();
     }
 
-    public function diff(string $key, int $fromVersion, int $toVersion, bool $includeDeleted = true): array
+    public function diff(string $key, int $fromVersion, int $toVersion, bool $includeDeleted = true, ?OwnershipReference $owner = null): array
     {
-        $from = $this->repository->find($key, (string) $fromVersion, includeDeleted: $includeDeleted);
-        $to = $this->repository->find($key, (string) $toVersion, includeDeleted: $includeDeleted);
+        $from = $this->repository->find($key, (string) $fromVersion, includeDeleted: $includeDeleted, owner: $owner);
+        $to = $this->repository->find($key, (string) $toVersion, includeDeleted: $includeDeleted, owner: $owner);
 
         if (! $from instanceof FormDefinition) {
             throw FormNotFoundException::forKey($key, (string) $fromVersion);
@@ -314,12 +336,14 @@ class FormMutationService
         ];
     }
 
-    public function paginateActive(int $perPage = 15, array $filters = []): LengthAwarePaginator
+    public function paginateActive(int $perPage = 15, array $filters = [], ?OwnershipReference $owner = null): LengthAwarePaginator
     {
-        $query = FormDefinition::query()
+        $query = ModelClassResolver::formDefinition()::query()
             ->where('is_active', true)
+            ->with('categoryModel')
             ->orderByDesc('updated_at')
             ->orderByDesc('id');
+        $this->ownership->applyScope($query, $owner);
 
         $category = $this->normalizedOptionalString($filters['category'] ?? null);
 
@@ -348,6 +372,14 @@ class FormMutationService
     {
         $schema = is_array($definition->schema) ? $definition->schema : [];
         $meta = is_array($definition->meta) ? $definition->meta : [];
+        $categoryModel = $definition->relationLoaded('categoryModel')
+            ? $definition->getRelation('categoryModel')
+            : $definition->categoryModel()->first();
+        $schemaCategory = $this->normalizedOptionalString($schema['category'] ?? null);
+        $legacyCategory = $this->normalizedOptionalString($definition->category ?? null);
+        $categoryKey = $categoryModel instanceof FormCategory
+            ? (string) $categoryModel->key
+            : ($schemaCategory ?? $legacyCategory);
 
         return [
             'key' => (string) $definition->key,
@@ -356,7 +388,8 @@ class FormMutationService
             'version' => (string) $definition->version,
             'version_number' => (int) ($definition->version_number ?? 0),
             'title' => (string) ($definition->title ?? ''),
-            'category' => (string) ($definition->category ?? config('formforge.forms.default_category', 'general')),
+            'category' => $categoryKey,
+            'category_item' => $categoryModel instanceof FormCategory ? $this->categories->toArray($categoryModel) : null,
             'is_active' => (bool) $definition->is_active,
             'is_published' => (bool) $definition->is_published,
             'published_at' => $definition->published_at?->toIso8601String(),
@@ -367,6 +400,8 @@ class FormMutationService
             'created_by_id' => $definition->created_by_id,
             'updated_by_type' => $definition->updated_by_type,
             'updated_by_id' => $definition->updated_by_id,
+            'owner_type' => $definition->owner_type,
+            'owner_id' => $definition->owner_id,
             'created_at' => $definition->created_at?->toIso8601String(),
             'updated_at' => $definition->updated_at?->toIso8601String(),
             'deleted_at' => $definition->deleted_at?->toIso8601String(),
@@ -381,21 +416,25 @@ class FormMutationService
         bool $published,
         ?Model $actor,
         array $meta = [],
+        ?FormCategory $category = null,
+        ?OwnershipReference $owner = null,
     ): FormDefinition {
-        FormDefinition::query()
-            ->where('key', $key)
-            ->update(['is_active' => false]);
+        $deactivate = ModelClassResolver::formDefinition()::query()
+            ->where('key', $key);
+        $this->ownership->applyScope($deactivate, $owner);
+        $deactivate->update(['is_active' => false]);
 
         $publishedAt = $published ? Carbon::now() : null;
 
-        return FormDefinition::query()->create([
+        $definition = ModelClassResolver::formDefinition()::query()->make([
             'key' => $key,
             'form_uuid' => $formUuid,
             'revision_id' => (string) Str::ulid(),
             'version' => (string) $versionNumber,
             'version_number' => $versionNumber,
             'title' => (string) ($schema['title'] ?? ''),
-            'category' => (string) ($schema['category'] ?? config('formforge.forms.default_category', 'general')),
+            'category' => (string) ($category?->key ?? ''),
+            'form_category_id' => $category?->getKey(),
             'schema' => $schema,
             'meta' => $meta,
             'schema_hash' => Schema::hash($schema),
@@ -407,6 +446,11 @@ class FormMutationService
             'updated_by_type' => $actor?->getMorphClass(),
             'updated_by_id' => $actor?->getKey(),
         ]);
+
+        $this->ownership->assignToModel($definition, $owner);
+        $definition->save();
+
+        return $definition->refresh();
     }
 
     private function normalizeSchema(
@@ -599,9 +643,9 @@ class FormMutationService
         return $candidate;
     }
 
-    private function activeOrFail(string $key): FormDefinition
+    private function activeOrFail(string $key, ?OwnershipReference $owner = null): FormDefinition
     {
-        $latest = $this->repository->latestActive($key);
+        $latest = $this->repository->latestActive($key, false, $owner);
 
         if (! $latest instanceof FormDefinition) {
             throw FormNotFoundException::forKey($key);
@@ -648,6 +692,42 @@ class FormMutationService
 
         if (in_array($normalized, ['0', 'false', 'no', 'off'], true)) {
             return false;
+        }
+
+        return null;
+    }
+
+    private function resolveOptionalCategoryModel(mixed $value, ?OwnershipReference $owner = null): ?FormCategory
+    {
+        $normalized = $this->normalizedOptionalString($value);
+
+        if ($normalized === null) {
+            return null;
+        }
+
+        return $this->categories->ensureForForms($normalized, $owner);
+    }
+
+    private function resolveCurrentCategoryModel(FormDefinition $definition, array $schema, ?OwnershipReference $owner = null): ?FormCategory
+    {
+        $loaded = $definition->relationLoaded('categoryModel')
+            ? $definition->getRelation('categoryModel')
+            : $definition->categoryModel()->first();
+
+        if ($loaded instanceof FormCategory) {
+            return $loaded;
+        }
+
+        $schemaCategory = $this->normalizedOptionalString($schema['category'] ?? null);
+
+        if ($schemaCategory !== null) {
+            return $this->categories->ensureForForms($schemaCategory, $owner);
+        }
+
+        $legacyCategory = $this->normalizedOptionalString($definition->category ?? null);
+
+        if ($legacyCategory !== null) {
+            return $this->categories->ensureForForms($legacyCategory, $owner);
         }
 
         return null;

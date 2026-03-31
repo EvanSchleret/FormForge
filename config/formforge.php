@@ -18,12 +18,43 @@ return [
     'database' => [
         'connection' => env('FORMFORGE_DB_CONNECTION', null),
         'forms_table' => 'formforge_forms',
+        'categories_table' => 'formforge_categories',
         'submissions_table' => 'formforge_submissions',
         'submission_files_table' => 'formforge_submission_files',
         'staged_uploads_table' => 'formforge_staged_uploads',
         'idempotency_keys_table' => 'formforge_idempotency_keys',
         'drafts_table' => 'formforge_drafts',
         'automation_runs_table' => 'formforge_submission_automation_runs',
+    ],
+
+    'models' => [
+        'form_definition' => \EvanSchleret\FormForge\Models\FormDefinition::class,
+        'form_category' => \EvanSchleret\FormForge\Models\FormCategory::class,
+        'form_submission' => \EvanSchleret\FormForge\Models\FormSubmission::class,
+        'submission_file' => \EvanSchleret\FormForge\Models\SubmissionFile::class,
+        'staged_upload' => \EvanSchleret\FormForge\Models\StagedUpload::class,
+        'idempotency_key' => \EvanSchleret\FormForge\Models\IdempotencyKey::class,
+        'form_draft' => \EvanSchleret\FormForge\Models\FormDraft::class,
+        'submission_automation_run' => \EvanSchleret\FormForge\Models\SubmissionAutomationRun::class,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Ownership
+    |--------------------------------------------------------------------------
+    |
+    | Optional polymorphic ownership for forms and categories.
+    | When enabled, FormForge resolves an owner context from each request and
+    | can scope management operations to that owner.
+    |
+    */
+
+    'ownership' => [
+        'enabled' => env('FORMFORGE_OWNERSHIP_ENABLED', false),
+        'required' => env('FORMFORGE_OWNERSHIP_REQUIRED', false),
+        'endpoints' => ['management'],
+        'resolver' => \EvanSchleret\FormForge\Ownership\NullOwnershipResolver::class,
+        'authorizer' => \EvanSchleret\FormForge\Ownership\AllowOwnershipAuthorizer::class,
     ],
 
     /*
@@ -162,6 +193,16 @@ return [
         'enabled' => true,
         'prefix' => 'api/formforge/v1',
         'middleware' => ['api'],
+        // Override these controller classes to customize package HTTP behavior.
+        // Each class must extend the corresponding package controller.
+        'controllers' => [
+            'schema' => \EvanSchleret\FormForge\Http\Controllers\FormSchemaController::class,
+            'submission' => \EvanSchleret\FormForge\Http\Controllers\FormSubmissionController::class,
+            'upload' => \EvanSchleret\FormForge\Http\Controllers\FormUploadController::class,
+            'resolve' => \EvanSchleret\FormForge\Http\Controllers\FormResolveController::class,
+            'draft' => \EvanSchleret\FormForge\Http\Controllers\FormDraftController::class,
+            'management' => \EvanSchleret\FormForge\Http\Controllers\FormManagementController::class,
+        ],
         'resources' => [
             // Optional JsonResource class for submission payloads.
             // Example: App\Http\Resources\FormForgeSubmissionResource::class
@@ -220,6 +261,11 @@ return [
             'ability' => null,
             'abilities' => [
                 'index' => null,
+                'categories' => null,
+                'category' => null,
+                'category_create' => null,
+                'category_update' => null,
+                'category_delete' => null,
                 'create' => null,
                 'update' => null,
                 'publish' => null,

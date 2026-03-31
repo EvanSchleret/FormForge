@@ -5,13 +5,14 @@ declare(strict_types=1);
 namespace EvanSchleret\FormForge\Submissions;
 
 use EvanSchleret\FormForge\Models\FormSubmission;
+use EvanSchleret\FormForge\Support\ModelClassResolver;
 use Illuminate\Pagination\LengthAwarePaginator;
 
 class SubmissionReadService
 {
     public function paginateForForm(string $formKey, int $perPage = 15, array $filters = []): LengthAwarePaginator
     {
-        $query = FormSubmission::query()
+        $query = ModelClassResolver::formSubmission()::query()
             ->where('form_key', $formKey)
             ->with('files')
             ->orderByDesc('id');
@@ -33,7 +34,7 @@ class SubmissionReadService
 
     public function findForForm(string $formKey, string $submissionUuid): ?FormSubmission
     {
-        return FormSubmission::query()
+        return ModelClassResolver::formSubmission()::query()
             ->where('form_key', $formKey)
             ->where('uuid', $submissionUuid)
             ->with('files')
@@ -42,14 +43,14 @@ class SubmissionReadService
 
     public function existsForForm(string $formKey): bool
     {
-        return FormSubmission::query()
+        return ModelClassResolver::formSubmission()::query()
             ->where('form_key', $formKey)
             ->exists();
     }
 
     public function deleteForForm(string $formKey, string $submissionUuid): bool
     {
-        $submission = FormSubmission::query()
+        $submission = ModelClassResolver::formSubmission()::query()
             ->where('form_key', $formKey)
             ->where('uuid', $submissionUuid)
             ->first();

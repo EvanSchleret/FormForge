@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace EvanSchleret\FormForge\Management;
 
 use EvanSchleret\FormForge\Exceptions\FormConflictException;
-use EvanSchleret\FormForge\Models\IdempotencyKey;
+use EvanSchleret\FormForge\Support\ModelClassResolver;
 use Illuminate\Support\Carbon;
 
 class IdempotencyService
@@ -22,7 +22,7 @@ class IdempotencyService
             return null;
         }
 
-        $record = IdempotencyKey::query()
+        $record = ModelClassResolver::idempotencyKey()::query()
             ->where('idempotency_key', $key)
             ->where('endpoint', $endpoint)
             ->where('method', strtoupper($method))
@@ -71,7 +71,7 @@ class IdempotencyService
         $ttl = (int) config('formforge.http.idempotency.ttl_minutes', 1440);
         $expiresAt = $ttl > 0 ? Carbon::now()->addMinutes($ttl) : null;
 
-        IdempotencyKey::query()->updateOrCreate(
+        ModelClassResolver::idempotencyKey()::query()->updateOrCreate(
             [
                 'idempotency_key' => $key,
                 'endpoint' => $endpoint,

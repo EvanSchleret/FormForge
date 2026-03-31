@@ -21,8 +21,10 @@ use EvanSchleret\FormForge\Http\EndpointRequestGuard;
 use EvanSchleret\FormForge\Http\HttpOptionsResolver;
 use EvanSchleret\FormForge\Http\Middleware\ApplyEndpointOptions;
 use EvanSchleret\FormForge\Http\Resources\SubmissionHttpResource;
+use EvanSchleret\FormForge\Management\FormCategoryService;
 use EvanSchleret\FormForge\Management\FormMutationService;
 use EvanSchleret\FormForge\Management\IdempotencyService;
+use EvanSchleret\FormForge\Ownership\OwnershipManager;
 use EvanSchleret\FormForge\Persistence\FormDefinitionRepository;
 use EvanSchleret\FormForge\Registry\FormRegistry;
 use EvanSchleret\FormForge\Submissions\SubmissionService;
@@ -42,8 +44,14 @@ class FormForgeServiceProvider extends ServiceProvider
         $this->app->singleton(FormRegistry::class, static fn (): FormRegistry => new FormRegistry());
         $this->app->singleton(AutomationRegistry::class, static fn (): AutomationRegistry => new AutomationRegistry());
         $this->app->singleton(FormDefinitionRepository::class, static fn (): FormDefinitionRepository => new FormDefinitionRepository());
+        $this->app->singleton(OwnershipManager::class, static fn (): OwnershipManager => new OwnershipManager());
+        $this->app->singleton(FormCategoryService::class, fn (): FormCategoryService => new FormCategoryService(
+            ownership: $this->app->make(OwnershipManager::class),
+        ));
         $this->app->singleton(FormMutationService::class, fn (): FormMutationService => new FormMutationService(
             repository: $this->app->make(FormDefinitionRepository::class),
+            categories: $this->app->make(FormCategoryService::class),
+            ownership: $this->app->make(OwnershipManager::class),
         ));
         $this->app->singleton(IdempotencyService::class, static fn (): IdempotencyService => new IdempotencyService());
         $this->app->singleton(SubmissionValidator::class, static fn (): SubmissionValidator => new SubmissionValidator());
@@ -90,6 +98,7 @@ class FormForgeServiceProvider extends ServiceProvider
                 repository: $this->app->make(FormDefinitionRepository::class),
                 submissionService: $this->app->make(SubmissionService::class),
                 automationRegistry: $this->app->make(AutomationRegistry::class),
+                categories: $this->app->make(FormCategoryService::class),
             ),
         );
     }

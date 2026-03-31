@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EvanSchleret\FormForge\Models;
 
+use EvanSchleret\FormForge\Support\ModelClassResolver;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -63,12 +64,12 @@ class FormSubmission extends Model
 
     public function files(): HasMany
     {
-        return $this->hasMany(SubmissionFile::class, 'form_submission_id');
+        return $this->hasMany(ModelClassResolver::submissionFile(), 'form_submission_id');
     }
 
     public function automationRuns(): HasMany
     {
-        return $this->hasMany(SubmissionAutomationRun::class, 'form_submission_id');
+        return $this->hasMany(ModelClassResolver::submissionAutomationRun(), 'form_submission_id');
     }
 
     public function submitter(): MorphTo

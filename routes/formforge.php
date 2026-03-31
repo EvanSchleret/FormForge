@@ -12,82 +12,78 @@ use Illuminate\Support\Facades\Route;
 
 $prefix = trim((string) config('formforge.http.prefix', 'api/formforge/v1'), '/');
 $middleware = config('formforge.http.middleware', ['api']);
+$controllers = config('formforge.http.controllers', []);
 
 if (! is_array($middleware)) {
     $middleware = ['api'];
 }
 
+if (! is_array($controllers)) {
+    $controllers = [];
+}
+
+$resolveController = static function (string $key, string $fallback) use ($controllers): string {
+    $configured = $controllers[$key] ?? $fallback;
+
+    if (! is_string($configured) || trim($configured) === '') {
+        throw new \InvalidArgumentException("Invalid formforge.http.controllers.{$key} controller class.");
+    }
+
+    if ($configured !== $fallback && ! is_subclass_of($configured, $fallback)) {
+        throw new \InvalidArgumentException("Configured formforge.http.controllers.{$key} must extend [{$fallback}].");
+    }
+
+    return $configured;
+};
+
+$schemaController = $resolveController('schema', FormSchemaController::class);
+$submissionController = $resolveController('submission', FormSubmissionController::class);
+$uploadController = $resolveController('upload', FormUploadController::class);
+$resolveControllerClass = $resolveController('resolve', FormResolveController::class);
+$draftController = $resolveController('draft', FormDraftController::class);
+$managementController = $resolveController('management', FormManagementController::class);
+
 Route::prefix($prefix)
     ->middleware($middleware)
-    ->group(static function (): void {
-        Route::middleware('formforge.endpoint:schema')->group(static function (): void {
-            Route::get('/forms/{key}', [FormSchemaController::class, 'latest']);
-            Route::get('/forms/{key}/versions', [FormSchemaController::class, 'versions']);
-            Route::get('/forms/{key}/versions/{version}', [FormSchemaController::class, 'show']);
-        });
+    ->group(static function () use (
+        $schemaController,
+        $submissionController,
+        $uploadController,
+        $resolveControllerClass,
+        $draftController,
+        $managementController,
+    ): void {
+        Route::middleware('formforge.endpoint:schema')->get('/forms/{key}', [$schemaController, 'latest']);
+        Route::middleware('formforge.endpoint:schema')->get('/forms/{key}/versions', [$schemaController, 'versions']);
+        Route::middleware('formforge.endpoint:schema')->get('/forms/{key}/versions/{version}', [$schemaController, 'show']);
 
-        Route::middleware('formforge.endpoint:submission')->group(static function (): void {
-            Route::post('/forms/{key}/submit', [FormSubmissionController::class, 'submitLatest']);
-            Route::post('/forms/{key}/versions/{version}/submit', [FormSubmissionController::class, 'submitVersion']);
-        });
+        Route::middleware('formforge.endpoint:submission')->post('/forms/{key}/submit', [$submissionController, 'submitLatest']);
+        Route::middleware('formforge.endpoint:submission')->post('/forms/{key}/versions/{version}/submit', [$submissionController, 'submitVersion']);
 
-        Route::middleware('formforge.endpoint:upload')->group(static function (): void {
-            Route::post('/forms/{key}/uploads/stage', [FormUploadController::class, 'stageLatest']);
-            Route::post('/forms/{key}/versions/{version}/uploads/stage', [FormUploadController::class, 'stageVersion']);
-        });
+        Route::middleware('formforge.endpoint:upload')->post('/forms/{key}/uploads/stage', [$uploadController, 'stageLatest']);
+        Route::middleware('formforge.endpoint:upload')->post('/forms/{key}/versions/{version}/uploads/stage', [$uploadController, 'stageVersion']);
 
-        Route::middleware('formforge.endpoint:resolve')->group(static function (): void {
-            Route::post('/forms/{key}/resolve', [FormResolveController::class, 'resolveLatest']);
-            Route::post('/forms/{key}/versions/{version}/resolve', [FormResolveController::class, 'resolveVersion']);
-        });
+        Route::middleware('formforge.endpoint:resolve')->post('/forms/{key}/resolve', [$resolveControllerClass, 'resolveLatest']);
+        Route::middleware('formforge.endpoint:resolve')->post('/forms/{key}/versions/{version}/resolve', [$resolveControllerClass, 'resolveVersion']);
 
-        Route::middleware('formforge.endpoint:draft')->group(static function (): void {
-            Route::post('/forms/{key}/drafts', [FormDraftController::class, 'save']);
-            Route::get('/forms/{key}/drafts/current', [FormDraftController::class, 'current']);
-            Route::delete('/forms/{key}/drafts/current', [FormDraftController::class, 'delete']);
-        });
+        Route::middleware('formforge.endpoint:draft')->post('/forms/{key}/drafts', [$draftController, 'save']);
+        Route::middleware('formforge.endpoint:draft')->get('/forms/{key}/drafts/current', [$draftController, 'current']);
+        Route::middleware('formforge.endpoint:draft')->delete('/forms/{key}/drafts/current', [$draftController, 'delete']);
 
-        Route::middleware('formforge.endpoint:management,index')->group(static function (): void {
-            Route::get('/forms', [FormManagementController::class, 'index']);
-        });
-
-        Route::middleware('formforge.endpoint:management,create')->group(static function (): void {
-            Route::post('/forms', [FormManagementController::class, 'create']);
-        });
-
-        Route::middleware('formforge.endpoint:management,update')->group(static function (): void {
-            Route::patch('/forms/{key}', [FormManagementController::class, 'patch']);
-        });
-
-        Route::middleware('formforge.endpoint:management,publish')->group(static function (): void {
-            Route::post('/forms/{key}/publish', [FormManagementController::class, 'publish']);
-        });
-
-        Route::middleware('formforge.endpoint:management,unpublish')->group(static function (): void {
-            Route::post('/forms/{key}/unpublish', [FormManagementController::class, 'unpublish']);
-        });
-
-        Route::middleware('formforge.endpoint:management,delete')->group(static function (): void {
-            Route::delete('/forms/{key}', [FormManagementController::class, 'delete']);
-        });
-
-        Route::middleware('formforge.endpoint:management,revisions')->group(static function (): void {
-            Route::get('/forms/{key}/revisions', [FormManagementController::class, 'revisions']);
-        });
-
-        Route::middleware('formforge.endpoint:management,diff')->group(static function (): void {
-            Route::get('/forms/{key}/diff/{fromVersion}/{toVersion}', [FormManagementController::class, 'diff']);
-        });
-
-        Route::middleware('formforge.endpoint:management,responses')->group(static function (): void {
-            Route::get('/forms/{key}/responses', [FormManagementController::class, 'responses']);
-        });
-
-        Route::middleware('formforge.endpoint:management,response')->group(static function (): void {
-            Route::get('/forms/{key}/responses/{submissionUuid}', [FormManagementController::class, 'response']);
-        });
-
-        Route::middleware('formforge.endpoint:management,response_delete')->group(static function (): void {
-            Route::delete('/forms/{key}/responses/{submissionUuid}', [FormManagementController::class, 'deleteResponse']);
-        });
+        Route::middleware('formforge.endpoint:management,index')->get('/forms', [$managementController, 'index']);
+        Route::middleware('formforge.endpoint:management,categories')->get('/categories', [$managementController, 'categories']);
+        Route::middleware('formforge.endpoint:management,category')->get('/categories/{categoryKey}', [$managementController, 'category']);
+        Route::middleware('formforge.endpoint:management,category_create')->post('/categories', [$managementController, 'createCategory']);
+        Route::middleware('formforge.endpoint:management,category_update')->patch('/categories/{categoryKey}', [$managementController, 'updateCategory']);
+        Route::middleware('formforge.endpoint:management,category_delete')->delete('/categories/{categoryKey}', [$managementController, 'deleteCategory']);
+        Route::middleware('formforge.endpoint:management,create')->post('/forms', [$managementController, 'create']);
+        Route::middleware('formforge.endpoint:management,update')->patch('/forms/{key}', [$managementController, 'patch']);
+        Route::middleware('formforge.endpoint:management,publish')->post('/forms/{key}/publish', [$managementController, 'publish']);
+        Route::middleware('formforge.endpoint:management,unpublish')->post('/forms/{key}/unpublish', [$managementController, 'unpublish']);
+        Route::middleware('formforge.endpoint:management,delete')->delete('/forms/{key}', [$managementController, 'delete']);
+        Route::middleware('formforge.endpoint:management,revisions')->get('/forms/{key}/revisions', [$managementController, 'revisions']);
+        Route::middleware('formforge.endpoint:management,diff')->get('/forms/{key}/diff/{fromVersion}/{toVersion}', [$managementController, 'diff']);
+        Route::middleware('formforge.endpoint:management,responses')->get('/forms/{key}/responses', [$managementController, 'responses']);
+        Route::middleware('formforge.endpoint:management,response')->get('/forms/{key}/responses/{submissionUuid}', [$managementController, 'response']);
+        Route::middleware('formforge.endpoint:management,response_delete')->delete('/forms/{key}/responses/{submissionUuid}', [$managementController, 'deleteResponse']);
     });

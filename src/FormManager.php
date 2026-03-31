@@ -10,10 +10,11 @@ use EvanSchleret\FormForge\Definition\FormBlueprint;
 use EvanSchleret\FormForge\Exceptions\DuplicateFormVersionException;
 use EvanSchleret\FormForge\Exceptions\FormNotFoundException;
 use EvanSchleret\FormForge\Exceptions\ImmutableVersionException;
-use EvanSchleret\FormForge\Models\FormDefinition;
+use EvanSchleret\FormForge\Management\FormCategoryService;
 use EvanSchleret\FormForge\Persistence\FormDefinitionRepository;
 use EvanSchleret\FormForge\Registry\FormRegistry;
 use EvanSchleret\FormForge\Submissions\SubmissionService;
+use EvanSchleret\FormForge\Support\ModelClassResolver;
 use EvanSchleret\FormForge\Support\FormSchemaLayout;
 use EvanSchleret\FormForge\Support\Schema;
 use EvanSchleret\FormForge\Support\Version;
@@ -26,6 +27,7 @@ class FormManager
         private readonly FormDefinitionRepository $repository,
         private readonly SubmissionService $submissionService,
         private readonly AutomationRegistry $automationRegistry,
+        private readonly FormCategoryService $categories,
     ) {
     }
 
@@ -160,11 +162,14 @@ class FormManager
                 $existing = $this->repository->find($key, $version);
 
                 if ($existing === null) {
-                    FormDefinition::query()->create([
+                    $category = $this->categories->ensureForForms(is_string($schema['category'] ?? null) ? (string) $schema['category'] : null);
+
+                    ModelClassResolver::formDefinition()::query()->create([
                         'key' => $key,
                         'version' => $version,
                         'title' => (string) $schema['title'],
-                        'category' => (string) ($schema['category'] ?? config('formforge.forms.default_category', 'general')),
+                        'category' => (string) $category->key,
+                        'form_category_id' => (int) $category->getKey(),
                         'schema' => $schema,
                         'schema_hash' => $hash,
                         'is_active' => false,

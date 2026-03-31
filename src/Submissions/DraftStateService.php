@@ -7,6 +7,7 @@ namespace EvanSchleret\FormForge\Submissions;
 use EvanSchleret\FormForge\Exceptions\FormForgeException;
 use EvanSchleret\FormForge\FormInstance;
 use EvanSchleret\FormForge\Models\FormDraft;
+use EvanSchleret\FormForge\Support\ModelClassResolver;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 
@@ -19,7 +20,7 @@ class DraftStateService
         [$ownerType, $ownerId] = $this->resolveOwner($owner);
         $normalizedPayload = $this->normalizePayload($form, $payload);
 
-        $draft = FormDraft::query()->updateOrCreate(
+        $draft = ModelClassResolver::formDraft()::query()->updateOrCreate(
             [
                 'form_key' => $form->key(),
                 'owner_type' => $ownerType,
@@ -42,7 +43,7 @@ class DraftStateService
 
         [$ownerType, $ownerId] = $this->resolveOwner($owner);
 
-        $draft = FormDraft::query()
+        $draft = ModelClassResolver::formDraft()::query()
             ->forForm($form->key())
             ->forOwner($ownerType, $ownerId)
             ->first();
@@ -66,7 +67,7 @@ class DraftStateService
 
         [$ownerType, $ownerId] = $this->resolveOwner($owner);
 
-        $deleted = FormDraft::query()
+        $deleted = ModelClassResolver::formDraft()::query()
             ->forForm($form->key())
             ->forOwner($ownerType, $ownerId)
             ->delete();
@@ -78,7 +79,7 @@ class DraftStateService
     {
         $chunk = max(1, $chunk);
 
-        $query = FormDraft::query()
+        $query = ModelClassResolver::formDraft()::query()
             ->whereNotNull('expires_at')
             ->where('expires_at', '<=', Carbon::now());
 

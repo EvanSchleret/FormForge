@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EvanSchleret\FormForge\Models;
 
+use EvanSchleret\FormForge\Support\ModelClassResolver;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -22,6 +23,6 @@ class SubmissionFile extends Model
 
     public function submission(): BelongsTo
     {
-        return $this->belongsTo(FormSubmission::class, 'form_submission_id');
+        return $this->belongsTo(ModelClassResolver::formSubmission(), 'form_submission_id');
     }
 }

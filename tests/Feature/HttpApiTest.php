@@ -3,10 +3,13 @@
 declare(strict_types=1);
 
 use EvanSchleret\FormForge\Facades\Form;
+use EvanSchleret\FormForge\Tests\Fixtures\Controllers\CustomFormManagementController;
+use EvanSchleret\FormForge\Tests\Fixtures\FormForgeOwnershipResolver;
 use EvanSchleret\FormForge\Tests\Fixtures\MarkSubmissionMiddleware;
 use EvanSchleret\FormForge\Tests\Fixtures\User;
 use EvanSchleret\FormForge\Tests\Fixtures\UserSummaryResource;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Routing\RouteCollection;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -248,6 +251,16 @@ it('registers HTTP helper commands', function (): void {
         ->assertExitCode(0);
 });
 
+it('allows overriding package HTTP controllers via configuration', function (): void {
+    config()->set('formforge.http.controllers.management', CustomFormManagementController::class);
+    $this->app['router']->setRoutes(new RouteCollection());
+    require dirname(__DIR__, 2) . '/routes/formforge.php';
+
+    $this->getJson('/api/formforge/v1/forms')
+        ->assertOk()
+        ->assertJsonPath('meta.custom_controller', true);
+});
+
 it('blocks live submission for unpublished forms and allows test submissions', function (): void {
     $key = 'unpublished_http_' . Str::lower(Str::random(8));
 
@@ -335,6 +348,12 @@ it('allows submitting staged forms when optional file fields are omitted', funct
 });
 
 it('creates a form revision through management endpoint', function (): void {
+    $category = $this->postJson('/api/formforge/v1/categories', [
+        'name' => 'Contact',
+    ])->assertCreated();
+
+    $categoryKey = (string) $category->json('data.key');
+
     $response = $this->postJson('/api/formforge/v1/forms', [
         'title' => 'Contact Form',
         'fields' => [
@@ -344,7 +363,7 @@ it('creates a form revision through management endpoint', function (): void {
                 'required' => true,
             ],
         ],
-        'category' => 'contact',
+        'category' => $categoryKey,
     ]);
 
     $response
@@ -363,22 +382,33 @@ it('creates a form revision through management endpoint', function (): void {
 });
 
 it('lists forms through paginated management endpoint', function (): void {
+    $surveyCategory = $this->postJson('/api/formforge/v1/categories', [
+        'name' => 'Survey',
+    ])->assertCreated();
+
+    $contactCategory = $this->postJson('/api/formforge/v1/categories', [
+        'name' => 'Contact',
+    ])->assertCreated();
+
+    $surveyCategoryKey = (string) $surveyCategory->json('data.key');
+    $contactCategoryKey = (string) $contactCategory->json('data.key');
+
     $this->postJson('/api/formforge/v1/forms', [
         'title' => 'Form A',
         'fields' => [['type' => 'text', 'name' => 'name']],
-        'category' => 'survey',
+        'category' => $surveyCategoryKey,
     ])->assertCreated();
 
     $this->postJson('/api/formforge/v1/forms', [
         'title' => 'Form B',
         'fields' => [['type' => 'email', 'name' => 'email']],
-        'category' => 'contact',
+        'category' => $contactCategoryKey,
     ])->assertCreated();
 
     $this->postJson('/api/formforge/v1/forms', [
         'title' => 'Form C',
         'fields' => [['type' => 'textarea', 'name' => 'message']],
-        'category' => 'survey',
+        'category' => $surveyCategoryKey,
     ])->assertCreated();
 
     $this->getJson('/api/formforge/v1/forms?per_page=2')
@@ -415,6 +445,138 @@ it('lists forms through paginated management endpoint', function (): void {
                 'next',
             ],
         ]);
+});
+
+it('manages form categories through HTTP endpoints', function (): void {
+    $create = $this->postJson('/api/formforge/v1/categories', [
+        'name' => 'Customer Survey',
+        'description' => 'Survey-oriented forms',
+    ]);
+
+    $create
+        ->assertCreated()
+        ->assertJsonPath('data.name', 'Customer Survey')
+        ->assertJsonPath('data.is_active', true)
+        ->assertJsonPath('data.is_system', false);
+
+    $categoryKey = (string) $create->json('data.key');
+
+    expect(Str::isUuid($categoryKey))->toBeTrue();
+
+    $this->getJson('/api/formforge/v1/categories')
+        ->assertOk()
+        ->assertJsonFragment(['key' => $categoryKey]);
+
+    $this->getJson("/api/formforge/v1/categories/{$categoryKey}")
+        ->assertOk()
+        ->assertJsonPath('data.name', 'Customer Survey');
+
+    $this->patchJson("/api/formforge/v1/categories/{$categoryKey}", [
+        'description' => 'Updated description',
+        'is_active' => false,
+    ])
+        ->assertOk()
+        ->assertJsonPath('data.description', 'Updated description')
+        ->assertJsonPath('data.is_active', false);
+
+    $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Survey Form',
+        'category' => $categoryKey,
+        'fields' => [
+            ['type' => 'text', 'name' => 'name'],
+        ],
+    ])->assertCreated();
+
+    $this->deleteJson("/api/formforge/v1/categories/{$categoryKey}")
+        ->assertStatus(409);
+
+    $temporary = $this->postJson('/api/formforge/v1/categories', [
+        'name' => 'Temporary Category',
+    ])->assertCreated();
+
+    $temporaryKey = (string) $temporary->json('data.key');
+
+    expect(Str::isUuid($temporaryKey))->toBeTrue();
+
+    $this->deleteJson("/api/formforge/v1/categories/{$temporaryKey}")
+        ->assertOk()
+        ->assertJsonPath('data.key', $temporaryKey)
+        ->assertJsonPath('data.deleted', true);
+});
+
+it('prevents deleting system categories', function (): void {
+    $create = $this->postJson('/api/formforge/v1/categories', [
+        'name' => 'Core',
+        'is_system' => true,
+    ]);
+
+    $create
+        ->assertCreated()
+        ->assertJsonPath('data.is_system', true);
+
+    $categoryKey = (string) $create->json('data.key');
+
+    $this->deleteJson("/api/formforge/v1/categories/{$categoryKey}")
+        ->assertStatus(409);
+});
+
+it('scopes management forms and categories by ownership context', function (): void {
+    config()->set('formforge.ownership.enabled', true);
+    config()->set('formforge.ownership.required', true);
+    config()->set('formforge.ownership.endpoints', ['management']);
+    config()->set('formforge.ownership.resolver', FormForgeOwnershipResolver::class);
+
+    $ownerAHeaders = [
+        'X-FormForge-Owner-Type' => 'community',
+        'X-FormForge-Owner-Id' => '1',
+    ];
+
+    $ownerBHeaders = [
+        'X-FormForge-Owner-Type' => 'community',
+        'X-FormForge-Owner-Id' => '2',
+    ];
+
+    $this->postJson('/api/formforge/v1/categories', [
+        'name' => 'No Owner',
+    ])->assertForbidden();
+
+    $categoryA = $this->withHeaders($ownerAHeaders)->postJson('/api/formforge/v1/categories', [
+        'name' => 'Owner A Category',
+    ])->assertCreated();
+
+    $categoryAKey = (string) $categoryA->json('data.key');
+
+    $createA = $this->withHeaders($ownerAHeaders)->postJson('/api/formforge/v1/forms', [
+        'title' => 'Owner A Form',
+        'category' => $categoryAKey,
+        'fields' => [
+            ['type' => 'text', 'name' => 'name'],
+        ],
+    ])->assertCreated();
+
+    $formAKey = (string) $createA->json('data.key');
+
+    $this->withHeaders($ownerAHeaders)->getJson('/api/formforge/v1/forms')
+        ->assertOk()
+        ->assertJsonPath('meta.total', 1)
+        ->assertJsonPath('data.data.0.owner_type', 'community')
+        ->assertJsonPath('data.data.0.owner_id', '1');
+
+    $this->withHeaders($ownerBHeaders)->getJson('/api/formforge/v1/forms')
+        ->assertOk()
+        ->assertJsonPath('meta.total', 0);
+
+    $this->withHeaders($ownerBHeaders)->patchJson("/api/formforge/v1/forms/{$formAKey}", [
+        'title' => 'Blocked',
+    ])->assertNotFound();
+
+    $this->withHeaders($ownerBHeaders)->postJson('/api/formforge/v1/forms', [
+        'title' => 'Owner B Form',
+        'category' => $categoryAKey,
+        'fields' => [
+            ['type' => 'text', 'name' => 'name'],
+        ],
+    ])->assertStatus(422);
 });
 
 it('lists form responses through paginated management endpoint', function (): void {
@@ -568,6 +730,31 @@ it('patches a form and creates a new draft revision', function (): void {
         ->assertJsonPath('data.title', 'Survey V2');
 });
 
+it('clears form category when patched with explicit null', function (): void {
+    $category = $this->postJson('/api/formforge/v1/categories', [
+        'name' => 'Survey',
+    ])->assertCreated();
+
+    $categoryKey = (string) $category->json('data.key');
+
+    $create = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Survey V1',
+        'category' => $categoryKey,
+        'fields' => [
+            ['type' => 'text', 'name' => 'name', 'required' => true],
+        ],
+    ])->assertCreated();
+
+    $key = (string) $create->json('data.key');
+
+    $this->patchJson("/api/formforge/v1/forms/{$key}", [
+        'category' => null,
+    ])
+        ->assertOk()
+        ->assertJsonPath('data.category', null)
+        ->assertJsonPath('data.category_item', null);
+});
+
 it('publishes and unpublishes through revisioned endpoints', function (): void {
     $create = $this->postJson('/api/formforge/v1/forms', [
         'title' => 'Feedback',
@@ -643,6 +830,35 @@ it('supports management ability authorization', function (): void {
         'title' => 'Allowed',
         'fields' => [['type' => 'text', 'name' => 'name']],
     ])->assertCreated();
+});
+
+it('supports management category ability authorization', function (): void {
+    config()->set('formforge.http.management.auth', 'required');
+    config()->set('formforge.http.management.abilities.category_create', 'formforge.category-create');
+
+    Gate::define('formforge.category-create', static fn (?User $user): bool => $user !== null && $user->name === 'allowed');
+
+    $this->postJson('/api/formforge/v1/categories', [
+        'name' => 'Blocked',
+    ])->assertUnauthorized();
+
+    $denied = User::query()->create(['name' => 'denied']);
+
+    $this->actingAs($denied)->postJson('/api/formforge/v1/categories', [
+        'name' => 'Blocked',
+    ])->assertForbidden();
+
+    $allowed = User::query()->create(['name' => 'allowed']);
+
+    $allowedResponse = $this->actingAs($allowed)->postJson('/api/formforge/v1/categories', [
+        'name' => 'Allowed',
+    ]);
+
+    $allowedResponse
+        ->assertCreated()
+        ->assertJsonPath('data.name', 'Allowed');
+
+    expect(Str::isUuid((string) $allowedResponse->json('data.key')))->toBeTrue();
 });
 
 it('supports management responses ability authorization', function (): void {

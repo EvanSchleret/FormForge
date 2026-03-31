@@ -7,6 +7,7 @@ namespace EvanSchleret\FormForge\Submissions;
 use EvanSchleret\FormForge\Automations\SubmissionAutomationDispatcher;
 use EvanSchleret\FormForge\Definition\FieldType;
 use EvanSchleret\FormForge\Models\FormSubmission;
+use EvanSchleret\FormForge\Support\ModelClassResolver;
 use EvanSchleret\FormForge\Support\FormSchemaLayout;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
@@ -53,7 +54,7 @@ class SubmissionService
                 $meta = [];
             }
 
-            $submission = FormSubmission::query()->create([
+            $submission = ModelClassResolver::formSubmission()::query()->create([
                 'form_key' => (string) ($effectiveSchema['key'] ?? ''),
                 'form_version' => (string) ($effectiveSchema['version'] ?? ''),
                 'payload' => $normalizedPayload,

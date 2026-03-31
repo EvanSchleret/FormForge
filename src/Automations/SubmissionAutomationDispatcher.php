@@ -9,6 +9,7 @@ use EvanSchleret\FormForge\Automations\Jobs\RunSubmissionAutomationJob;
 use EvanSchleret\FormForge\Exceptions\FormForgeException;
 use EvanSchleret\FormForge\Models\FormSubmission;
 use EvanSchleret\FormForge\Models\SubmissionAutomationRun;
+use EvanSchleret\FormForge\Support\ModelClassResolver;
 use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Support\Carbon;
 
@@ -46,7 +47,7 @@ class SubmissionAutomationDispatcher
 
     public function run(int $submissionId, string $automationKey): void
     {
-        $submission = FormSubmission::query()->find($submissionId);
+        $submission = ModelClassResolver::formSubmission()::query()->find($submissionId);
 
         if (! $submission instanceof FormSubmission) {
             return;
@@ -96,7 +97,7 @@ class SubmissionAutomationDispatcher
     {
         $now = Carbon::now();
 
-        $inserted = (int) SubmissionAutomationRun::query()->insertOrIgnore([
+        $inserted = (int) ModelClassResolver::submissionAutomationRun()::query()->insertOrIgnore([
             'form_submission_id' => (int) $submission->getKey(),
             'form_key' => (string) $submission->form_key,
             'automation_key' => $definition->automationKey,
@@ -111,7 +112,7 @@ class SubmissionAutomationDispatcher
             'updated_at' => $now,
         ]);
 
-        $run = SubmissionAutomationRun::query()
+        $run = ModelClassResolver::submissionAutomationRun()::query()
             ->where('form_submission_id', (int) $submission->getKey())
             ->where('automation_key', $definition->automationKey)
             ->first();
