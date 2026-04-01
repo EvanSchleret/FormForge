@@ -3,9 +3,12 @@
 declare(strict_types=1);
 
 use EvanSchleret\FormForge\Facades\Form;
+use EvanSchleret\FormForge\Http\Authorization\FormForgeAuthorizationContext;
+use EvanSchleret\FormForge\Ownership\NullOwnershipResolver;
 use EvanSchleret\FormForge\Tests\Fixtures\Controllers\CustomFormManagementController;
 use EvanSchleret\FormForge\Tests\Fixtures\FormForgeOwnershipResolver;
 use EvanSchleret\FormForge\Tests\Fixtures\MarkSubmissionMiddleware;
+use EvanSchleret\FormForge\Tests\Fixtures\Policies\UserScopedFormForgePolicy;
 use EvanSchleret\FormForge\Tests\Fixtures\User;
 use EvanSchleret\FormForge\Tests\Fixtures\UserSummaryResource;
 use Illuminate\Http\UploadedFile;
@@ -259,6 +262,167 @@ it('allows overriding package HTTP controllers via configuration', function (): 
     $this->getJson('/api/formforge/v1/forms')
         ->assertOk()
         ->assertJsonPath('meta.custom_controller', true);
+});
+
+it('allows disabling specific package HTTP endpoint groups', function (): void {
+    config()->set('formforge.http.endpoints.management', false);
+    $this->app['router']->setRoutes(new RouteCollection());
+    require dirname(__DIR__, 2) . '/routes/formforge.php';
+
+    $key = 'schema_only_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')->required();
+
+    $this->getJson("/api/formforge/v1/forms/{$key}")
+        ->assertOk()
+        ->assertJsonPath('data.key', $key);
+
+    $this->getJson('/api/formforge/v1/forms')
+        ->assertNotFound();
+});
+
+it('supports scoped management routes with policy authorization', function (): void {
+    config()->set('formforge.http.endpoints.management', false);
+    config()->set('formforge.ownership.enabled', false);
+    config()->set('formforge.http.scoped_routes', [[
+        'name' => 'user',
+        'prefix' => 'users/{user}',
+        'owner' => [
+            'route_param' => 'user',
+            'model' => User::class,
+        ],
+        'authorization' => [
+            'mode' => 'policy',
+            'policy' => UserScopedFormForgePolicy::class,
+        ],
+        'endpoints' => [
+            'management' => true,
+            'schema' => false,
+            'submission' => false,
+            'upload' => false,
+            'resolve' => false,
+            'draft' => false,
+        ],
+    ]]);
+
+    $this->app['router']->setRoutes(new RouteCollection());
+    require dirname(__DIR__, 2) . '/routes/formforge.php';
+
+    $owner = User::query()->create(['name' => 'Owner']);
+    $other = User::query()->create(['name' => 'Other']);
+
+    $create = $this->actingAs($owner)->postJson("/api/formforge/v1/users/{$owner->getKey()}/forms", [
+        'title' => 'Scoped Form',
+        'fields' => [
+            ['type' => 'text', 'name' => 'name'],
+        ],
+    ]);
+
+    $create
+        ->assertCreated()
+        ->assertJsonPath('data.owner_type', $owner->getMorphClass())
+        ->assertJsonPath('data.owner_id', (string) $owner->getKey());
+
+    $this->actingAs($owner)->getJson("/api/formforge/v1/users/{$owner->getKey()}/forms")
+        ->assertOk()
+        ->assertJsonPath('meta.total', 1);
+
+    $this->actingAs($other)->getJson("/api/formforge/v1/users/{$owner->getKey()}/forms")
+        ->assertForbidden();
+
+    $this->getJson('/api/formforge/v1/forms')
+        ->assertNotFound();
+});
+
+it('supports scoped management routes with gate authorization', function (): void {
+    config()->set('formforge.http.endpoints.management', false);
+    config()->set('formforge.ownership.enabled', false);
+    config()->set('formforge.http.scoped_routes', [[
+        'name' => 'user',
+        'prefix' => 'users/{user}',
+        'owner' => [
+            'route_param' => 'user',
+            'model' => User::class,
+        ],
+        'authorization' => [
+            'mode' => 'gate',
+            'abilities' => [
+                'management.index' => 'formforge.scoped.index',
+                'management.create' => 'formforge.scoped.create',
+            ],
+        ],
+        'endpoints' => [
+            'management' => true,
+            'schema' => false,
+            'submission' => false,
+            'upload' => false,
+            'resolve' => false,
+            'draft' => false,
+        ],
+    ]]);
+
+    Gate::define('formforge.scoped.index', static function (?User $user, FormForgeAuthorizationContext $context): bool {
+        $owner = $context->ownerModel();
+
+        if (! $user instanceof User || ! $owner instanceof User) {
+            return false;
+        }
+
+        return (int) $user->getKey() === (int) $owner->getKey();
+    });
+
+    Gate::define('formforge.scoped.create', static function (?User $user, FormForgeAuthorizationContext $context): bool {
+        $owner = $context->ownerModel();
+
+        if (! $user instanceof User || ! $owner instanceof User) {
+            return false;
+        }
+
+        return (int) $user->getKey() === (int) $owner->getKey();
+    });
+
+    $this->app['router']->setRoutes(new RouteCollection());
+    require dirname(__DIR__, 2) . '/routes/formforge.php';
+
+    $owner = User::query()->create(['name' => 'Owner']);
+    $other = User::query()->create(['name' => 'Other']);
+
+    $this->actingAs($owner)->postJson("/api/formforge/v1/users/{$owner->getKey()}/forms", [
+        'title' => 'Scoped Gate Form',
+        'fields' => [
+            ['type' => 'text', 'name' => 'name'],
+        ],
+    ])->assertCreated();
+
+    $this->actingAs($owner)->getJson("/api/formforge/v1/users/{$owner->getKey()}/forms")
+        ->assertOk()
+        ->assertJsonPath('meta.total', 1);
+
+    $this->actingAs($other)->getJson("/api/formforge/v1/users/{$owner->getKey()}/forms")
+        ->assertForbidden();
+});
+
+it('fails closed on management endpoints when ownership is enabled and unresolved', function (): void {
+    config()->set('formforge.ownership.enabled', true);
+    config()->set('formforge.ownership.required', false);
+    config()->set('formforge.ownership.endpoints', ['management']);
+    config()->set('formforge.ownership.resolver', NullOwnershipResolver::class);
+
+    $this->getJson('/api/formforge/v1/forms')
+        ->assertForbidden();
+});
+
+it('allows unresolved ownership on management when fail-closed endpoints are disabled', function (): void {
+    config()->set('formforge.ownership.enabled', true);
+    config()->set('formforge.ownership.required', false);
+    config()->set('formforge.ownership.endpoints', ['management']);
+    config()->set('formforge.ownership.fail_closed_endpoints', []);
+    config()->set('formforge.ownership.resolver', NullOwnershipResolver::class);
+
+    $this->getJson('/api/formforge/v1/forms')
+        ->assertOk();
 });
 
 it('blocks live submission for unpublished forms and allows test submissions', function (): void {
@@ -527,12 +691,12 @@ it('scopes management forms and categories by ownership context', function (): v
     config()->set('formforge.ownership.resolver', FormForgeOwnershipResolver::class);
 
     $ownerAHeaders = [
-        'X-FormForge-Owner-Type' => 'community',
+        'X-FormForge-Owner-Type' => 'user',
         'X-FormForge-Owner-Id' => '1',
     ];
 
     $ownerBHeaders = [
-        'X-FormForge-Owner-Type' => 'community',
+        'X-FormForge-Owner-Type' => 'user',
         'X-FormForge-Owner-Id' => '2',
     ];
 
@@ -559,7 +723,7 @@ it('scopes management forms and categories by ownership context', function (): v
     $this->withHeaders($ownerAHeaders)->getJson('/api/formforge/v1/forms')
         ->assertOk()
         ->assertJsonPath('meta.total', 1)
-        ->assertJsonPath('data.data.0.owner_type', 'community')
+        ->assertJsonPath('data.data.0.owner_type', 'user')
         ->assertJsonPath('data.data.0.owner_id', '1');
 
     $this->withHeaders($ownerBHeaders)->getJson('/api/formforge/v1/forms')

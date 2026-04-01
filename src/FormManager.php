@@ -11,6 +11,8 @@ use EvanSchleret\FormForge\Exceptions\DuplicateFormVersionException;
 use EvanSchleret\FormForge\Exceptions\FormNotFoundException;
 use EvanSchleret\FormForge\Exceptions\ImmutableVersionException;
 use EvanSchleret\FormForge\Management\FormCategoryService;
+use EvanSchleret\FormForge\Management\FormMutationService;
+use EvanSchleret\FormForge\Ownership\OwnershipReference;
 use EvanSchleret\FormForge\Persistence\FormDefinitionRepository;
 use EvanSchleret\FormForge\Registry\FormRegistry;
 use EvanSchleret\FormForge\Submissions\SubmissionService;
@@ -18,6 +20,7 @@ use EvanSchleret\FormForge\Support\ModelClassResolver;
 use EvanSchleret\FormForge\Support\FormSchemaLayout;
 use EvanSchleret\FormForge\Support\Schema;
 use EvanSchleret\FormForge\Support\Version;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 
 class FormManager
@@ -25,6 +28,7 @@ class FormManager
     public function __construct(
         private readonly FormRegistry $registry,
         private readonly FormDefinitionRepository $repository,
+        private readonly FormMutationService $mutations,
         private readonly SubmissionService $submissionService,
         private readonly AutomationRegistry $automationRegistry,
         private readonly FormCategoryService $categories,
@@ -131,6 +135,15 @@ class FormManager
         );
 
         return $instances;
+    }
+
+    public function for(Model|array|OwnershipReference $owner): ScopedFormManager
+    {
+        return new ScopedFormManager(
+            repository: $this->repository,
+            mutations: $this->mutations,
+            owner: OwnershipReference::from($owner),
+        );
     }
 
     public function automation(string $formKey): AutomationBuilder

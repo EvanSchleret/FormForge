@@ -8,6 +8,7 @@ use Closure;
 use EvanSchleret\FormForge\FormInstance;
 use EvanSchleret\FormForge\FormManager;
 use EvanSchleret\FormForge\Exceptions\FormNotFoundException;
+use EvanSchleret\FormForge\Http\Authorization\ScopedRouteAuthorizer;
 use EvanSchleret\FormForge\Http\EndpointRequestGuard;
 use EvanSchleret\FormForge\Http\HttpOptionsResolver;
 use EvanSchleret\FormForge\Ownership\OwnershipManager;
@@ -21,6 +22,7 @@ class ApplyEndpointOptions
         private readonly HttpOptionsResolver $resolver,
         private readonly EndpointRequestGuard $requestGuard,
         private readonly OwnershipManager $ownership,
+        private readonly ScopedRouteAuthorizer $scopedAuthorization,
     ) {
     }
 
@@ -44,6 +46,7 @@ class ApplyEndpointOptions
         $request->attributes->set('formforge.ownership', $ownership?->toArray());
         $request->attributes->set('formforge.ownership.reference', $ownership);
         $this->ownership->assertRequestAuthorized($request, $endpoint, $action, $ownership);
+        $this->scopedAuthorization->authorize($request, $endpoint, $action, $ownership);
 
         $key = trim((string) $request->route('key'));
 

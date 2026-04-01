@@ -7,9 +7,11 @@ use EvanSchleret\FormForge\Exceptions\UnknownFieldsException;
 use EvanSchleret\FormForge\Facades\Form;
 use EvanSchleret\FormForge\FormManager;
 use EvanSchleret\FormForge\Models\FormDraft;
+use EvanSchleret\FormForge\Models\FormDefinition;
 use EvanSchleret\FormForge\Models\SubmissionAutomationRun;
 use EvanSchleret\FormForge\Models\StagedUpload;
 use EvanSchleret\FormForge\Automations\SubmissionAutomationDispatcher;
+use EvanSchleret\FormForge\Ownership\OwnershipReference;
 use EvanSchleret\FormForge\Registry\FormRegistry;
 use EvanSchleret\FormForge\Tests\Fixtures\CreateMembershipFromSubmissionAutomation;
 use EvanSchleret\FormForge\Tests\Fixtures\Models\CustomFormSubmission;
@@ -393,6 +395,119 @@ it('scaffolds a submission automation class with make command', function (): voi
     expect($content)->toContain('namespace App\\FormForge\\Automations\\Membership;');
     expect($content)->toContain('class CreateMembership implements SubmissionAutomation');
     expect($content)->toContain('public function handle(FormSubmission $submission): void');
+});
+
+it('scaffolds HTTP override controllers with make command', function (): void {
+    $directory = storage_path('app/formforge-tests/http-controllers/' . Str::lower(Str::random(8)));
+    File::ensureDirectoryExists($directory);
+
+    $this->artisan("formforge:make:http-controller --controller=management --controller=schema --path={$directory} --namespace=App\\\\Http\\\\Controllers\\\\FormForge")
+        ->expectsOutputToContain('Controller created:')
+        ->expectsOutputToContain("'management' => \\App\\Http\\Controllers\\FormForge\\FormForgeManagementController::class,")
+        ->expectsOutputToContain("'schema' => \\App\\Http\\Controllers\\FormForge\\FormForgeSchemaController::class,")
+        ->assertExitCode(0);
+
+    $management = $directory . '/FormForgeManagementController.php';
+    $schema = $directory . '/FormForgeSchemaController.php';
+
+    expect(File::exists($management))->toBeTrue();
+    expect(File::exists($schema))->toBeTrue();
+
+    $managementContent = (string) File::get($management);
+    $schemaContent = (string) File::get($schema);
+
+    expect($managementContent)->toContain('class FormForgeManagementController extends FormManagementController');
+    expect($managementContent)->toContain('public function index(Request $request, FormMutationService $mutations): JsonResponse');
+    expect($schemaContent)->toContain('class FormForgeSchemaController extends FormSchemaController');
+});
+
+it('scaffolds scoped policy with model helper', function (): void {
+    $directory = storage_path('app/formforge-tests/policies/' . Str::lower(Str::random(8)));
+    File::ensureDirectoryExists($directory);
+
+    $this->artisan("formforge:make:policy UserFormForgePolicy --path={$directory} --namespace=App\\\\Policies\\\\FormForge --model=App\\\\Models\\\\User --param=user")
+        ->expectsOutputToContain('Policy created:')
+        ->expectsOutputToContain("'mode' => 'policy'")
+        ->assertExitCode(0);
+
+    $policy = $directory . '/UserFormForgePolicy.php';
+
+    expect(File::exists($policy))->toBeTrue();
+
+    $content = (string) File::get($policy);
+
+    expect($content)->toContain('class UserFormForgePolicy extends BaseFormForgePolicy');
+    expect($content)->toContain('protected function owner(FormForgeAuthorizationContext $context): ?User');
+    expect($content)->toContain('public function management_index(mixed $user, FormForgeAuthorizationContext $context): bool');
+});
+
+it('builds ownership reference from model, array, and existing reference', function (): void {
+    $user = User::query()->create([
+        'name' => 'Owner',
+    ]);
+
+    $fromModel = OwnershipReference::from($user);
+    $fromArray = OwnershipReference::from([
+        'type' => 'user',
+        'id' => '42',
+    ]);
+    $fromLegacyArray = OwnershipReference::from([
+        'owner_type' => 'team',
+        'owner_id' => '7',
+    ]);
+    $fromSelf = OwnershipReference::from($fromModel);
+
+    expect($fromModel->type)->toBe($user->getMorphClass());
+    expect($fromModel->id)->toBe((string) $user->getKey());
+    expect($fromArray->type)->toBe('user');
+    expect($fromArray->id)->toBe('42');
+    expect($fromLegacyArray->type)->toBe('team');
+    expect($fromLegacyArray->id)->toBe('7');
+    expect($fromSelf)->toBe($fromModel);
+});
+
+it('rejects invalid ownership payloads when building ownership reference', function (): void {
+    expect(static fn () => OwnershipReference::from([
+        'type' => '',
+        'id' => '',
+    ]))->toThrow(\InvalidArgumentException::class);
+
+    expect(static fn () => OwnershipReference::from([
+        'owner_type' => 'user',
+        'owner_id' => '',
+    ]))->toThrow(\InvalidArgumentException::class);
+});
+
+it('scopes management mutations and reads through Form::for owner API', function (): void {
+    $ownerA = ['type' => 'user', 'id' => '1'];
+    $ownerB = ['type' => 'user', 'id' => '2'];
+
+    $created = Form::for($ownerA)->create([
+        'title' => 'Owner A Form',
+        'fields' => [
+            ['type' => 'text', 'name' => 'name'],
+        ],
+    ]);
+
+    expect($created->owner_type)->toBe('user');
+    expect($created->owner_id)->toBe('1');
+
+    $listA = Form::for($ownerA)->paginateActive();
+    $listB = Form::for($ownerB)->paginateActive();
+    $queryA = Form::for($ownerA)->queryActive();
+    $queryB = Form::for($ownerB)->queryActive();
+
+    expect($listA->total())->toBe(1);
+    expect($listB->total())->toBe(0);
+    expect($queryA->getModel())->toBeInstanceOf(FormDefinition::class);
+    expect($queryA->count())->toBe(1);
+    expect($queryB->count())->toBe(0);
+
+    $latestA = Form::for($ownerA)->latestActive((string) $created->key);
+    $latestB = Form::for($ownerB)->latestActive((string) $created->key);
+
+    expect($latestA)->not->toBeNull();
+    expect($latestB)->toBeNull();
 });
 
 it('merges published config with latest defaults without losing project overrides', function (): void {

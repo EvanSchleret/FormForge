@@ -15,6 +15,7 @@ use EvanSchleret\FormForge\Persistence\FormDefinitionRepository;
 use EvanSchleret\FormForge\Support\ModelClassResolver;
 use EvanSchleret\FormForge\Support\FormSchemaLayout;
 use EvanSchleret\FormForge\Support\Schema;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
@@ -338,6 +339,21 @@ class FormMutationService
 
     public function paginateActive(int $perPage = 15, array $filters = [], ?OwnershipReference $owner = null): LengthAwarePaginator
     {
+        $query = $this->queryActive($filters, $owner);
+
+        $paginator = $query->paginate($perPage);
+
+        $paginator->setCollection(
+            $paginator->getCollection()
+                ->map(fn (FormDefinition $definition): array => $this->toDetailArray($definition))
+                ->values(),
+        );
+
+        return $paginator;
+    }
+
+    public function queryActive(array $filters = [], ?OwnershipReference $owner = null): Builder
+    {
         $query = ModelClassResolver::formDefinition()::query()
             ->where('is_active', true)
             ->with('categoryModel')
@@ -357,15 +373,7 @@ class FormMutationService
             $query->where('is_published', $published);
         }
 
-        $paginator = $query->paginate($perPage);
-
-        $paginator->setCollection(
-            $paginator->getCollection()
-                ->map(fn (FormDefinition $definition): array => $this->toDetailArray($definition))
-                ->values(),
-        );
-
-        return $paginator;
+        return $query;
     }
 
     public function toDetailArray(FormDefinition $definition): array

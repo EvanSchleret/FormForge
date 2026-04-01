@@ -24,6 +24,19 @@ class OwnershipManager
         return (bool) config('formforge.ownership.required', false);
     }
 
+    public function requiredForEndpoint(string $endpoint): bool
+    {
+        if (! $this->enabled() || ! $this->isEndpointEnabled($endpoint)) {
+            return false;
+        }
+
+        if ($this->required()) {
+            return true;
+        }
+
+        return in_array($endpoint, $this->failClosedEndpoints(), true);
+    }
+
     public function isEndpointEnabled(string $endpoint): bool
     {
         $endpoints = config('formforge.ownership.endpoints', ['management']);
@@ -43,6 +56,12 @@ class OwnershipManager
 
     public function resolve(Request $request, string $endpoint, ?string $action = null): ?OwnershipReference
     {
+        $preResolved = $request->attributes->get('formforge.ownership.reference');
+
+        if ($preResolved instanceof OwnershipReference) {
+            return $preResolved;
+        }
+
         if (! $this->enabled() || ! $this->isEndpointEnabled($endpoint)) {
             return null;
         }
@@ -59,7 +78,7 @@ class OwnershipManager
             return;
         }
 
-        if ($this->required() && ! $ownership instanceof OwnershipReference) {
+        if ($this->requiredForEndpoint($endpoint) && ! $ownership instanceof OwnershipReference) {
             throw new AuthorizationException('FormForge ownership context is required.');
         }
 
@@ -147,6 +166,33 @@ class OwnershipManager
         }
 
         throw new FormForgeException('Ownership resolver must return null, Model, OwnershipReference, or array(type,id).');
+    }
+
+    private function failClosedEndpoints(): array
+    {
+        $configured = config('formforge.ownership.fail_closed_endpoints', ['management']);
+
+        if (! is_array($configured)) {
+            return ['management'];
+        }
+
+        $endpoints = [];
+
+        foreach ($configured as $entry) {
+            if (! is_string($entry)) {
+                continue;
+            }
+
+            $value = trim($entry);
+
+            if ($value === '') {
+                continue;
+            }
+
+            $endpoints[] = $value;
+        }
+
+        return array_values(array_unique($endpoints));
     }
 
     private function resolver(): ResolvesOwnership

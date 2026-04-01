@@ -98,13 +98,20 @@ Choose one mode first. You can move to another later.
 
 - Use routes under `formforge.http.prefix`
 - Configure auth/guard/middleware/abilities per endpoint group
-- Use ownership resolver if you need owner-scoped management
+- Use ownership resolver if you need owner-scoped management without route context
 
-### Mode C: package HTTP API + custom controllers
+### Mode C: package HTTP API + scoped routes (recommended for owner URL context)
+
+- Keep package controllers and business logic
+- Configure contextual route prefixes in `formforge.http.scoped_routes`
+- Resolve owner model automatically from route parameters
+- Configure scoped authorization with `policy` or `gate` mode
+
+### Mode D: package HTTP API + custom controllers (advanced)
 
 - Keep package routes and services
 - Override selected controller classes in config
-- Inject your tenant/community logic directly where you need it
+- Inject your tenant/owner logic directly where you need it
 - Keep method signatures compatible with package controllers
 
 ## Requirements
@@ -227,11 +234,12 @@ Default prefix: `api/formforge/v1`
 
 ### API resource customization
 
-You can customize submission serialization with Laravel `JsonResource` classes:
+You can customize HTTP serialization with Laravel `JsonResource` classes:
 
 ```php
 'http' => [
     'resources' => [
+        'form_definition' => \App\Http\Resources\FormDefinitionResource::class, // optional management form resource
         'submission' => null, // optional full submission resource class
         'submitter' => \App\Http\Resources\UserResource::class, // optional submitted_by resource class
         'file_urls' => [
@@ -244,8 +252,9 @@ You can customize submission serialization with Laravel `JsonResource` classes:
 ],
 ```
 
-With `submitter`, submission payloads include a `submitted_by` key serialized through your resource.
-With `file_urls.enabled=true`, default submission resources enrich file metadata (in both `payload` and `files`) with signed temporary URLs when supported by the disk, with fallback to regular disk URLs.
+- `form_definition` customizes management payloads (`GET /forms`, `POST /forms`, etc.).
+- `submitter` makes submission payloads include `submitted_by` through your resource.
+- `file_urls.enabled=true` enriches file metadata (in both `payload` and `files`) with signed temporary URLs when supported by the disk, with fallback to regular disk URLs.
 
 ### Model overrides
 
@@ -274,6 +283,7 @@ FormForge can scope forms and categories to a polymorphic owner (`owner_type`, `
     'enabled' => true,
     'required' => true,
     'endpoints' => ['management'],
+    'fail_closed_endpoints' => ['management'],
     'resolver' => \App\FormForge\Ownership\FormForgeOwnershipResolver::class,
     'authorizer' => \App\FormForge\Ownership\FormForgeOwnershipAuthorizer::class,
 ],
@@ -292,47 +302,140 @@ Resolver can return:
 
 When ownership is enabled, management responses include `owner_type` and `owner_id` on forms and categories.
 
-### Override HTTP controllers
+`fail_closed_endpoints` defaults to `['management']`.  
+If ownership is enabled and no owner is resolved for those endpoints, the request is rejected with `403`.
 
-If you need contextual API behavior (community, tenant, custom authorization flow), you can override package controllers while keeping all package services and response contracts.
+### Scoped HTTP routes (recommended for owner URL context)
 
-Each custom controller must extend the corresponding package controller.
+If your API uses contextual prefixes (for example `/users/{user}` or `/teams/{team}`), configure scoped routes instead of overriding every controller method.
 
 ```php
 'http' => [
-    'controllers' => [
-        'schema' => \EvanSchleret\FormForge\Http\Controllers\FormSchemaController::class,
-        'submission' => \EvanSchleret\FormForge\Http\Controllers\FormSubmissionController::class,
-        'upload' => \EvanSchleret\FormForge\Http\Controllers\FormUploadController::class,
-        'resolve' => \EvanSchleret\FormForge\Http\Controllers\FormResolveController::class,
-        'draft' => \EvanSchleret\FormForge\Http\Controllers\FormDraftController::class,
-        'management' => \App\Http\Controllers\FormForge\CommunityFormManagementController::class,
+    'endpoints' => [
+        'management' => false, // disable unscoped management routes if needed
+    ],
+    'scoped_routes' => [
+        [
+            'name' => 'user',
+            'enabled' => true,
+            'prefix' => 'users/{user}',
+            'middleware' => ['auth:sanctum'],
+            'endpoints' => [
+                'management' => true,
+                'schema' => false,
+                'submission' => false,
+                'upload' => false,
+                'resolve' => false,
+                'draft' => false,
+            ],
+            'owner' => [
+                'route_param' => 'user',
+                'model' => \App\Models\User::class,
+                'route_key' => null, // defaults to model getRouteKeyName()
+                'type' => null, // optional fallback when model is not used
+                'required' => true,
+            ],
+            'authorization' => [
+                'mode' => 'policy', // none|gate|policy
+                'policy' => \App\Policies\FormForge\UserFormForgePolicy::class,
+                'abilities' => [], // used only for gate mode
+            ],
+        ],
     ],
 ],
 ```
 
-Example:
+With this config, FormForge automatically exposes the package endpoints under:
+
+- `/api/formforge/v1/users/{user}/forms`
+- `/api/formforge/v1/users/{user}/categories`
+- and all other enabled endpoint groups for that scoped route
+
+The owner is resolved from route context, then injected into package services (create/list/update/publish/delete/category ops) without controller rewrites.
+
+### Scoped authorization modes
+
+`authorization.mode` supports:
+
+- `none`: no additional scoped authorization layer
+- `gate`: per-route Gate abilities using keys like `management.index`, `management.create`, `schema.latest`
+- `policy`: policy class extending package base policy (recommended)
+
+Policy mode is fail-closed by default because the package base policy returns `false` for every action.
+
+### Policy scaffold command
+
+Generate a scoped policy with all FormForge HTTP action methods:
+
+```bash
+php artisan formforge:make:policy UserFormForgePolicy --model="App\\Models\\User" --param=user
+```
+
+This generates a policy extending `EvanSchleret\FormForge\Http\Authorization\BaseFormForgePolicy`.
+
+### Override HTTP controllers (advanced)
+
+Use controller overrides only when you need behavior that cannot be expressed through scoped routes and policy/gate configuration.
+
+Each custom controller must extend the corresponding package controller.
+
+Generate scaffolds:
+
+```bash
+php artisan formforge:make:http-controller --controller=management --controller=schema
+```
+
+Common options:
+
+- `--all` to scaffold all override controllers
+- `--path=` to customize the destination directory
+- `--namespace=` to customize the generated namespace
+- no `--controller` option triggers an interactive selection prompt
+
+`FormManagementController` also exposes extension hooks:
+
+- `resolveOwner(Request $request, string $action): ?OwnershipReference`
+- `authorizeAction(Request $request, string $action, ?OwnershipReference $owner): void`
+
+### Scoped owner API (code-first)
+
+You can scope management operations directly without HTTP resolver plumbing:
 
 ```php
-<?php
+use EvanSchleret\FormForge\Facades\Form;
 
-declare(strict_types=1);
+$forms = Form::for($user); // Model|array|OwnershipReference
 
-namespace App\Http\Controllers\FormForge;
+$created = $forms->create([
+    'title' => 'Owner form',
+    'fields' => [
+        ['type' => 'text', 'name' => 'name'],
+    ],
+], $request->user());
 
-use EvanSchleret\FormForge\Http\Controllers\FormManagementController;
-use EvanSchleret\FormForge\Management\FormMutationService;
-use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
+$list = $forms->paginateActive();
+$single = $forms->latestActive((string) $created->key);
+```
 
-final class CommunityFormManagementController extends FormManagementController
-{
-    public function index(Request $request, FormMutationService $mutations): JsonResponse
-    {
-        // Add your community context logic here, then delegate or customize.
-        return parent::index($request, $mutations);
-    }
-}
+### Builder + Resource access for custom response layers
+
+If you use a custom response helper (for example `ResourceTool::paginate`), you can reuse package builder + resource:
+
+```php
+use EvanSchleret\FormForge\Facades\Form;
+use EvanSchleret\FormForge\Http\Resources\FormDefinitionHttpResource;
+
+$query = Form::for($user)->queryActive([
+    'category' => request('category'),
+    'is_published' => request('is_published'),
+]);
+
+return ResourceTool::paginate(
+    request(),
+    new FormDefinitionHttpResource(null),
+    $query,
+    20,
+);
 ```
 
 ### Schema endpoints
@@ -455,6 +558,23 @@ Example:
             'response' => 'formforge.read-response',
             'response_delete' => 'formforge.delete-response',
         ],
+    ],
+],
+```
+
+### Endpoint toggles
+
+You can disable endpoint groups when you expose your own app routes:
+
+```php
+'http' => [
+    'endpoints' => [
+        'schema' => true,
+        'submission' => true,
+        'upload' => true,
+        'resolve' => true,
+        'draft' => true,
+        'management' => false,
     ],
 ],
 ```
@@ -598,6 +718,8 @@ php artisan formforge:install
 php artisan formforge:install:merge
 php artisan formforge:sync
 php artisan formforge:make:automation CreateUserFromSubmission --form=user-registration --sync
+php artisan formforge:make:http-controller --controller=management --controller=schema
+php artisan formforge:make:policy UserFormForgePolicy --model="App\\Models\\User" --param=user
 php artisan formforge:list
 php artisan formforge:describe contact
 php artisan formforge:http:options
@@ -622,7 +744,6 @@ Use them to guide AI agents implementing FormForge in Laravel APIs.
 - [ ] Add first-class signed upload URL flow for object storage direct upload
 - [ ] Add cleanup command for expired idempotency keys
 - [ ] Add OpenAPI export command for FormForge HTTP contracts
-- [ ] Add policy scaffold command for management/draft abilities
 - [ ] Add revision migration tooling (dry-run + apply) for schema evolution
 - [ ] Add full FormForge page analytics helpers
 - [ ] Add first-party Laravel Boost template pack for FormForge + auth presets

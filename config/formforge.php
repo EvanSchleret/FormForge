@@ -53,6 +53,7 @@ return [
         'enabled' => env('FORMFORGE_OWNERSHIP_ENABLED', false),
         'required' => env('FORMFORGE_OWNERSHIP_REQUIRED', false),
         'endpoints' => ['management'],
+        'fail_closed_endpoints' => ['management'],
         'resolver' => \EvanSchleret\FormForge\Ownership\NullOwnershipResolver::class,
         'authorizer' => \EvanSchleret\FormForge\Ownership\AllowOwnershipAuthorizer::class,
     ],
@@ -193,6 +194,44 @@ return [
         'enabled' => true,
         'prefix' => 'api/formforge/v1',
         'middleware' => ['api'],
+        'endpoints' => [
+            'schema' => true,
+            'submission' => true,
+            'upload' => true,
+            'resolve' => true,
+            'draft' => true,
+            'management' => true,
+        ],
+        'scoped_routes' => [
+            /*
+            [
+                'name' => 'user',
+                'enabled' => true,
+                'prefix' => 'users/{user}',
+                'middleware' => ['auth:sanctum'],
+                'endpoints' => [
+                    'management' => true,
+                    'schema' => false,
+                    'submission' => false,
+                    'upload' => false,
+                    'resolve' => false,
+                    'draft' => false,
+                ],
+                'owner' => [
+                    'route_param' => 'user',
+                    'model' => App\Models\User::class,
+                    'route_key' => null,
+                    'type' => null,
+                    'required' => true,
+                ],
+                'authorization' => [
+                    'mode' => 'policy',
+                    'policy' => App\Policies\FormForge\UserFormForgePolicy::class,
+                    'abilities' => [],
+                ],
+            ],
+            */
+        ],
         // Override these controller classes to customize package HTTP behavior.
         // Each class must extend the corresponding package controller.
         'controllers' => [
@@ -204,6 +243,9 @@ return [
             'management' => \EvanSchleret\FormForge\Http\Controllers\FormManagementController::class,
         ],
         'resources' => [
+            // Optional JsonResource class for management form_definition payloads.
+            // Example: App\Http\Resources\FormDefinitionResource::class
+            'form_definition' => \EvanSchleret\FormForge\Http\Resources\FormDefinitionHttpResource::class,
             // Optional JsonResource class for submission payloads.
             // Example: App\Http\Resources\FormForgeSubmissionResource::class
             'submission' => null,

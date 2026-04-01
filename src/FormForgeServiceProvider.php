@@ -15,11 +15,16 @@ use EvanSchleret\FormForge\Commands\InstallCommand;
 use EvanSchleret\FormForge\Commands\InstallMergeCommand;
 use EvanSchleret\FormForge\Commands\ListCommand;
 use EvanSchleret\FormForge\Commands\MakeAutomationCommand;
+use EvanSchleret\FormForge\Commands\MakeHttpControllerCommand;
+use EvanSchleret\FormForge\Commands\MakePolicyCommand;
 use EvanSchleret\FormForge\Commands\SyncCommand;
 use EvanSchleret\FormForge\Commands\UploadsCleanupCommand;
+use EvanSchleret\FormForge\Http\Authorization\ScopedRouteAuthorizer;
 use EvanSchleret\FormForge\Http\EndpointRequestGuard;
 use EvanSchleret\FormForge\Http\HttpOptionsResolver;
 use EvanSchleret\FormForge\Http\Middleware\ApplyEndpointOptions;
+use EvanSchleret\FormForge\Http\Middleware\ApplyRouteScope;
+use EvanSchleret\FormForge\Http\ScopedRouteManager;
 use EvanSchleret\FormForge\Http\Resources\SubmissionHttpResource;
 use EvanSchleret\FormForge\Management\FormCategoryService;
 use EvanSchleret\FormForge\Management\FormMutationService;
@@ -65,6 +70,8 @@ class FormForgeServiceProvider extends ServiceProvider
             ),
         );
         $this->app->singleton(HttpOptionsResolver::class, static fn (): HttpOptionsResolver => new HttpOptionsResolver());
+        $this->app->singleton(ScopedRouteManager::class, static fn (): ScopedRouteManager => new ScopedRouteManager());
+        $this->app->singleton(ScopedRouteAuthorizer::class, static fn (): ScopedRouteAuthorizer => new ScopedRouteAuthorizer());
         $this->app->singleton(SubmissionHttpResource::class, static fn (): SubmissionHttpResource => new SubmissionHttpResource());
         $this->app->singleton(
             EndpointRequestGuard::class,
@@ -96,6 +103,7 @@ class FormForgeServiceProvider extends ServiceProvider
             fn (): FormManager => new FormManager(
                 registry: $this->app->make(FormRegistry::class),
                 repository: $this->app->make(FormDefinitionRepository::class),
+                mutations: $this->app->make(FormMutationService::class),
                 submissionService: $this->app->make(SubmissionService::class),
                 automationRegistry: $this->app->make(AutomationRegistry::class),
                 categories: $this->app->make(FormCategoryService::class),
@@ -117,6 +125,7 @@ class FormForgeServiceProvider extends ServiceProvider
 
         $router = $this->app->make('router');
         $router->aliasMiddleware('formforge.endpoint', ApplyEndpointOptions::class);
+        $router->aliasMiddleware('formforge.scope', ApplyRouteScope::class);
 
         if ((bool) config('formforge.http.enabled', true)) {
             $this->loadRoutesFrom(dirname(__DIR__) . '/routes/formforge.php');
@@ -127,6 +136,8 @@ class FormForgeServiceProvider extends ServiceProvider
                 InstallCommand::class,
                 InstallMergeCommand::class,
                 MakeAutomationCommand::class,
+                MakeHttpControllerCommand::class,
+                MakePolicyCommand::class,
                 ListCommand::class,
                 DescribeCommand::class,
                 SyncCommand::class,
