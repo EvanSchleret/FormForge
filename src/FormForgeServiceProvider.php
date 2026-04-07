@@ -16,9 +16,13 @@ use EvanSchleret\FormForge\Commands\InstallMergeCommand;
 use EvanSchleret\FormForge\Commands\ListCommand;
 use EvanSchleret\FormForge\Commands\MakeAutomationCommand;
 use EvanSchleret\FormForge\Commands\MakeAutomationResolverCommand;
+use EvanSchleret\FormForge\Commands\GdprPolicyCommand;
+use EvanSchleret\FormForge\Commands\GdprResponseCommand;
+use EvanSchleret\FormForge\Commands\GdprRunCommand;
 use EvanSchleret\FormForge\Commands\MakeHttpControllerCommand;
 use EvanSchleret\FormForge\Commands\MakePolicyCommand;
 use EvanSchleret\FormForge\Commands\SyncCommand;
+use EvanSchleret\FormForge\Commands\SubmissionsExportCommand;
 use EvanSchleret\FormForge\Commands\UploadsCleanupCommand;
 use EvanSchleret\FormForge\Http\Authorization\ScopedRouteAuthorizer;
 use EvanSchleret\FormForge\Http\EndpointRequestGuard;
@@ -34,6 +38,8 @@ use EvanSchleret\FormForge\Ownership\OwnershipManager;
 use EvanSchleret\FormForge\Persistence\FormDefinitionRepository;
 use EvanSchleret\FormForge\Registry\FormRegistry;
 use EvanSchleret\FormForge\Submissions\SubmissionService;
+use EvanSchleret\FormForge\Submissions\SubmissionExportService;
+use EvanSchleret\FormForge\Submissions\SubmissionPrivacyService;
 use EvanSchleret\FormForge\Submissions\SubmissionReadService;
 use EvanSchleret\FormForge\Submissions\SubmissionValidator;
 use EvanSchleret\FormForge\Submissions\DraftStateService;
@@ -65,6 +71,18 @@ class FormForgeServiceProvider extends ServiceProvider
             SubmissionReadService::class,
             fn (): SubmissionReadService => new SubmissionReadService(
                 ownership: $this->app->make(OwnershipManager::class),
+            ),
+        );
+        $this->app->singleton(
+            SubmissionExportService::class,
+            fn (): SubmissionExportService => new SubmissionExportService(
+                submissions: $this->app->make(SubmissionReadService::class),
+            ),
+        );
+        $this->app->singleton(
+            SubmissionPrivacyService::class,
+            fn (): SubmissionPrivacyService => new SubmissionPrivacyService(
+                submissions: $this->app->make(SubmissionReadService::class),
             ),
         );
         $this->app->singleton(DraftStateService::class, static fn (): DraftStateService => new DraftStateService());
@@ -111,6 +129,8 @@ class FormForgeServiceProvider extends ServiceProvider
                 repository: $this->app->make(FormDefinitionRepository::class),
                 mutations: $this->app->make(FormMutationService::class),
                 submissionService: $this->app->make(SubmissionService::class),
+                submissionExports: $this->app->make(SubmissionExportService::class),
+                submissionPrivacy: $this->app->make(SubmissionPrivacyService::class),
                 automationRegistry: $this->app->make(AutomationRegistry::class),
                 categories: $this->app->make(FormCategoryService::class),
             ),
@@ -151,6 +171,10 @@ class FormForgeServiceProvider extends ServiceProvider
                 HttpOptionsCommand::class,
                 HttpResolveCommand::class,
                 HttpRoutesCommand::class,
+                SubmissionsExportCommand::class,
+                GdprRunCommand::class,
+                GdprPolicyCommand::class,
+                GdprResponseCommand::class,
                 UploadsCleanupCommand::class,
                 DraftsCleanupCommand::class,
             ]);

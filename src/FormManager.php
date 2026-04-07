@@ -16,6 +16,8 @@ use EvanSchleret\FormForge\Ownership\OwnershipReference;
 use EvanSchleret\FormForge\Persistence\FormDefinitionRepository;
 use EvanSchleret\FormForge\Registry\FormRegistry;
 use EvanSchleret\FormForge\Submissions\SubmissionService;
+use EvanSchleret\FormForge\Submissions\SubmissionExportService;
+use EvanSchleret\FormForge\Submissions\SubmissionPrivacyService;
 use EvanSchleret\FormForge\Support\ModelClassResolver;
 use EvanSchleret\FormForge\Support\FormSchemaLayout;
 use EvanSchleret\FormForge\Support\Schema;
@@ -30,6 +32,8 @@ class FormManager
         private readonly FormDefinitionRepository $repository,
         private readonly FormMutationService $mutations,
         private readonly SubmissionService $submissionService,
+        private readonly SubmissionExportService $submissionExports,
+        private readonly SubmissionPrivacyService $submissionPrivacy,
         private readonly AutomationRegistry $automationRegistry,
         private readonly FormCategoryService $categories,
     ) {
@@ -142,6 +146,8 @@ class FormManager
         return new ScopedFormManager(
             repository: $this->repository,
             mutations: $this->mutations,
+            submissionExports: $this->submissionExports,
+            submissionPrivacy: $this->submissionPrivacy,
             owner: OwnershipReference::from($owner),
         );
     }
@@ -154,6 +160,50 @@ class FormManager
     public function automationForResolver(string $resolverClass): AutomationBuilder
     {
         return $this->automationRegistry->forResolver($resolverClass);
+    }
+
+    public function exportSubmissions(
+        string $formKey,
+        string $format = 'csv',
+        array $filters = [],
+        bool $withHeader = true,
+    ): string {
+        return $this->submissionExports->exportToString($formKey, $format, $filters, null, $withHeader);
+    }
+
+    public function exportSubmissionsToPath(
+        string $path,
+        string $formKey,
+        string $format = 'csv',
+        array $filters = [],
+        bool $withHeader = true,
+    ): int {
+        return $this->submissionExports->exportToPath($path, $formKey, $format, $filters, null, $withHeader);
+    }
+
+    public function setGdprGlobalPolicy(array $input): \EvanSchleret\FormForge\Models\SubmissionPrivacyPolicy
+    {
+        return $this->submissionPrivacy->upsertGlobalPolicy($input);
+    }
+
+    public function setGdprFormPolicy(string $formKey, array $input): \EvanSchleret\FormForge\Models\SubmissionPrivacyPolicy
+    {
+        return $this->submissionPrivacy->upsertFormPolicy($formKey, $input);
+    }
+
+    public function scheduleGdprResponseAction(
+        string $formKey,
+        string $submissionUuid,
+        string $action = 'anonymize',
+        array $input = [],
+        ?Model $requestedBy = null,
+    ): array {
+        return $this->submissionPrivacy->scheduleResponseAction($formKey, $submissionUuid, $action, $input, null, $requestedBy);
+    }
+
+    public function runGdpr(array $options = []): array
+    {
+        return $this->submissionPrivacy->run($options, null);
     }
 
     public function sync(): array

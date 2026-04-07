@@ -83,8 +83,13 @@ class HttpRoutesCommand extends Command
             $rows[] = ['GET', '/' . $prefix . '/forms/{key}/revisions', 'management(revisions)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])];
             $rows[] = ['GET', '/' . $prefix . '/forms/{key}/diff/{fromVersion}/{toVersion}', 'management(diff)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])];
             $rows[] = ['GET', '/' . $prefix . '/forms/{key}/responses', 'management(responses)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])];
+            $rows[] = ['GET', '/' . $prefix . '/forms/{key}/responses/export', 'management(responses_export)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])];
+            $rows[] = ['PUT', '/' . $prefix . '/forms/{key}/gdpr-policy', 'management(gdpr_policy)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])];
             $rows[] = ['GET', '/' . $prefix . '/forms/{key}/responses/{submissionUuid}', 'management(response)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])];
             $rows[] = ['DELETE', '/' . $prefix . '/forms/{key}/responses/{submissionUuid}', 'management(response_delete)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])];
+            $rows[] = ['POST', '/' . $prefix . '/forms/{key}/responses/{submissionUuid}/gdpr/anonymize', 'management(response_gdpr_anonymize)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])];
+            $rows[] = ['POST', '/' . $prefix . '/forms/{key}/responses/{submissionUuid}/gdpr/delete', 'management(response_gdpr_delete)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])];
+            $rows[] = ['POST', '/' . $prefix . '/gdpr/run', 'management(gdpr_run)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])];
         }
 
         $this->info('Global route middleware');

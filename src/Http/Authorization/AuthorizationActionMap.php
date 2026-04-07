@@ -35,8 +35,13 @@ class AuthorizationActionMap
             'management.revisions' => 'management_revisions',
             'management.diff' => 'management_diff',
             'management.responses' => 'management_responses',
+            'management.responses_export' => 'management_responses_export',
             'management.response' => 'management_response',
             'management.response_delete' => 'management_response_delete',
+            'management.gdpr_policy' => 'management_gdpr_policy',
+            'management.response_gdpr_anonymize' => 'management_response_gdpr_anonymize',
+            'management.response_gdpr_delete' => 'management_response_gdpr_delete',
+            'management.gdpr_run' => 'management_gdpr_run',
         ];
     }
 
@@ -65,4 +70,3 @@ class AuthorizationActionMap
         return array_values(self::all());
     }
 }
-

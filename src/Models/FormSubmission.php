@@ -23,6 +23,7 @@ use Illuminate\Support\Str;
  * @property string|null $ip_address
  * @property string|null $user_agent
  * @property array<string, mixed>|null $meta
+ * @property \Illuminate\Support\Carbon|null $anonymized_at
  * @property \Illuminate\Support\Carbon|null $created_at
  * @property \Illuminate\Support\Carbon|null $updated_at
  * @property-read \Illuminate\Database\Eloquent\Collection<int, SubmissionFile> $files
@@ -42,6 +43,7 @@ class FormSubmission extends Model
         'payload' => 'array',
         'is_test' => 'boolean',
         'meta' => 'array',
+        'anonymized_at' => 'datetime',
     ];
 
     protected static function booted(): void
@@ -70,6 +72,11 @@ class FormSubmission extends Model
     public function automationRuns(): HasMany
     {
         return $this->hasMany(ModelClassResolver::submissionAutomationRun(), 'form_submission_id');
+    }
+
+    public function privacyOverrides(): HasMany
+    {
+        return $this->hasMany(ModelClassResolver::submissionPrivacyOverride(), 'form_submission_id');
     }
 
     public function submitter(): MorphTo

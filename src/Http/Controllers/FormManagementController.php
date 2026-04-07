@@ -15,10 +15,13 @@ use EvanSchleret\FormForge\Models\FormDefinition;
 use EvanSchleret\FormForge\Ownership\OwnershipReference;
 use EvanSchleret\FormForge\Persistence\FormDefinitionRepository;
 use EvanSchleret\FormForge\Submissions\SubmissionReadService;
+use EvanSchleret\FormForge\Submissions\SubmissionExportService;
+use EvanSchleret\FormForge\Submissions\SubmissionPrivacyService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
@@ -158,10 +161,7 @@ class FormManagementController
         }
 
         $perPage = $this->boundedInt($request->query('per_page', 15), 1, 100, 15);
-        $filters = [
-            'version' => is_string($request->query('version')) ? trim((string) $request->query('version')) : null,
-            'is_test' => $request->query('is_test'),
-        ];
+        $filters = $this->submissionFilters($request);
 
         $paginator = $submissions->paginateForForm($key, $perPage, $filters, $owner);
         $paginator->appends($request->query());
@@ -186,6 +186,35 @@ class FormManagementController
                 'next' => $paginator->nextPageUrl(),
             ],
         ]);
+    }
+
+    public function exportResponses(
+        Request $request,
+        FormDefinitionRepository $repository,
+        SubmissionReadService $submissions,
+        SubmissionExportService $exports,
+    ): StreamedResponse {
+        $key = $this->routeRequired($request, 'key');
+        $owner = $this->resolvedOwner($request, 'responses_export');
+        $knownForm = $repository->keyExists($key, true, $owner);
+        $knownBySubmissionOnly = $submissions->existsForForm($key, $owner);
+
+        if (! $knownForm && ! $knownBySubmissionOnly) {
+            throw new NotFoundHttpException("Form [{$key}] not found.");
+        }
+
+        $format = is_string($request->query('format')) ? trim((string) $request->query('format')) : 'csv';
+        $filename = is_string($request->query('filename')) ? trim((string) $request->query('filename')) : null;
+        $withHeader = ! $this->toBool($request->query('no_header', false));
+
+        return $exports->downloadResponse(
+            formKey: $key,
+            format: $format,
+            filters: $this->submissionFilters($request),
+            owner: $owner,
+            filename: $filename,
+            withHeader: $withHeader,
+        );
     }
 
     public function response(
@@ -246,6 +275,156 @@ class FormManagementController
                 'submission_uuid' => $submissionUuid,
                 'deleted' => true,
             ],
+        ]);
+    }
+
+    public function upsertGdprPolicy(
+        Request $request,
+        FormDefinitionRepository $repository,
+        SubmissionReadService $submissions,
+        SubmissionPrivacyService $privacy,
+    ): JsonResponse {
+        $key = $this->routeRequired($request, 'key');
+        $owner = $this->resolvedOwner($request, 'gdpr_policy');
+        $knownForm = $repository->keyExists($key, true, $owner);
+        $knownBySubmissionOnly = $submissions->existsForForm($key, $owner);
+
+        if (! $knownForm && ! $knownBySubmissionOnly) {
+            throw new NotFoundHttpException("Form [{$key}] not found.");
+        }
+
+        try {
+            $policy = $privacy->upsertFormPolicy($key, $request->all());
+        } catch (FormForgeException $exception) {
+            throw ValidationException::withMessages([
+                'gdpr_policy' => [$exception->getMessage()],
+            ]);
+        }
+
+        return response()->json([
+            'data' => [
+                'scope' => (string) $policy->scope,
+                'form_key' => (string) ($policy->form_key ?? ''),
+                'action' => (string) $policy->action,
+                'after_days' => $policy->after_days,
+                'anonymize_fields' => is_array($policy->anonymize_fields) ? $policy->anonymize_fields : [],
+                'delete_files' => (bool) $policy->delete_files,
+                'redact_submitter' => (bool) $policy->redact_submitter,
+                'redact_network' => (bool) $policy->redact_network,
+                'enabled' => (bool) $policy->enabled,
+            ],
+        ]);
+    }
+
+    public function anonymizeResponse(
+        Request $request,
+        SubmissionPrivacyService $privacy,
+    ): JsonResponse {
+        $key = $this->routeRequired($request, 'key');
+        $submissionUuid = $this->routeRequired($request, 'submissionUuid');
+        $owner = $this->resolvedOwner($request, 'response_gdpr_anonymize');
+        $payload = $request->all();
+
+        if (! array_key_exists('now', $payload) && ! array_key_exists('execute_at', $payload) && ! array_key_exists('at', $payload)) {
+            $payload['now'] = true;
+        }
+
+        try {
+            $result = $privacy->scheduleResponseAction(
+                formKey: $key,
+                submissionUuid: $submissionUuid,
+                action: 'anonymize',
+                input: $payload,
+                owner: $owner,
+                requestedBy: $request->user(),
+            );
+        } catch (FormForgeException $exception) {
+            if (str_contains(strtolower($exception->getMessage()), 'not found')) {
+                throw new NotFoundHttpException($exception->getMessage(), $exception);
+            }
+
+            throw ValidationException::withMessages([
+                'gdpr' => [$exception->getMessage()],
+            ]);
+        }
+
+        /** @var \EvanSchleret\FormForge\Models\SubmissionPrivacyOverride $override */
+        $override = $result['override'];
+
+        return response()->json([
+            'data' => [
+                'override_id' => (int) $override->getKey(),
+                'action' => (string) $override->action,
+                'execute_at' => $override->execute_at?->toIso8601String(),
+                'processed_at' => $override->processed_at?->toIso8601String(),
+                'executed' => (bool) $result['executed'],
+                'anonymized' => (bool) $result['anonymized'],
+                'deleted' => (bool) $result['deleted'],
+            ],
+        ]);
+    }
+
+    public function deleteResponseByGdpr(
+        Request $request,
+        SubmissionPrivacyService $privacy,
+    ): JsonResponse {
+        $key = $this->routeRequired($request, 'key');
+        $submissionUuid = $this->routeRequired($request, 'submissionUuid');
+        $owner = $this->resolvedOwner($request, 'response_gdpr_delete');
+        $payload = $request->all();
+
+        if (! array_key_exists('now', $payload) && ! array_key_exists('execute_at', $payload) && ! array_key_exists('at', $payload)) {
+            $payload['now'] = true;
+        }
+
+        try {
+            $result = $privacy->scheduleResponseAction(
+                formKey: $key,
+                submissionUuid: $submissionUuid,
+                action: 'delete',
+                input: $payload,
+                owner: $owner,
+                requestedBy: $request->user(),
+            );
+        } catch (FormForgeException $exception) {
+            if (str_contains(strtolower($exception->getMessage()), 'not found')) {
+                throw new NotFoundHttpException($exception->getMessage(), $exception);
+            }
+
+            throw ValidationException::withMessages([
+                'gdpr' => [$exception->getMessage()],
+            ]);
+        }
+
+        /** @var \EvanSchleret\FormForge\Models\SubmissionPrivacyOverride $override */
+        $override = $result['override'];
+
+        return response()->json([
+            'data' => [
+                'override_id' => (int) $override->getKey(),
+                'action' => (string) $override->action,
+                'execute_at' => $override->execute_at?->toIso8601String(),
+                'processed_at' => $override->processed_at?->toIso8601String(),
+                'executed' => (bool) $result['executed'],
+                'anonymized' => (bool) $result['anonymized'],
+                'deleted' => (bool) $result['deleted'],
+            ],
+        ]);
+    }
+
+    public function runGdpr(
+        Request $request,
+        SubmissionPrivacyService $privacy,
+    ): JsonResponse {
+        $owner = $this->resolvedOwner($request, 'gdpr_run');
+
+        $result = $privacy->run([
+            'dry_run' => $this->toBool($request->input('dry_run', $request->query('dry_run', false))),
+            'chunk' => $request->input('chunk', $request->query('chunk')),
+        ], $owner);
+
+        return response()->json([
+            'data' => $result,
         ]);
     }
 
@@ -567,6 +746,21 @@ class FormManagementController
         }
 
         return $candidate;
+    }
+
+    private function submissionFilters(Request $request): array
+    {
+        return [
+            'version' => is_string($request->query('version')) ? trim((string) $request->query('version')) : null,
+            'is_test' => $request->query('is_test'),
+            'submitted_by_type' => is_string($request->query('submitted_by_type')) ? trim((string) $request->query('submitted_by_type')) : null,
+            'submitted_by_id' => is_string($request->query('submitted_by_id')) ? trim((string) $request->query('submitted_by_id')) : null,
+            'has_files' => $request->query('has_files'),
+            'from' => is_string($request->query('from')) ? trim((string) $request->query('from')) : null,
+            'to' => is_string($request->query('to')) ? trim((string) $request->query('to')) : null,
+            'created_from' => is_string($request->query('created_from')) ? trim((string) $request->query('created_from')) : null,
+            'created_to' => is_string($request->query('created_to')) ? trim((string) $request->query('created_to')) : null,
+        ];
     }
 
     protected function resolveOwner(Request $request, string $action): ?OwnershipReference

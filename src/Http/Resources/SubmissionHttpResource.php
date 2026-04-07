@@ -47,7 +47,7 @@ class SubmissionHttpResource
         if ($submitterResourceClass !== null) {
             $submitter = $submission->relationLoaded('submitter')
                 ? $submission->getRelation('submitter')
-                : $submission->submitter()->first();
+                : $this->resolveSubmitter($submission);
 
             $data['submitted_by'] = $submitter === null
                 ? null
@@ -181,5 +181,21 @@ class SubmissionHttpResource
         $key = trim((string) config('formforge.http.resources.file_urls.key', 'url'));
 
         return $key === '' ? 'url' : $key;
+    }
+
+    private function resolveSubmitter(FormSubmission $submission): mixed
+    {
+        $submittedByType = trim((string) ($submission->submitted_by_type ?? ''));
+        $submittedById = trim((string) ($submission->submitted_by_id ?? ''));
+
+        if ($submittedByType === '' || $submittedById === '') {
+            return null;
+        }
+
+        try {
+            return $submission->submitter()->first();
+        } catch (\Throwable) {
+            return null;
+        }
     }
 }

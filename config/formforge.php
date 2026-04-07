@@ -25,6 +25,8 @@ return [
         'idempotency_keys_table' => 'formforge_idempotency_keys',
         'drafts_table' => 'formforge_drafts',
         'automation_runs_table' => 'formforge_submission_automation_runs',
+        'privacy_policies_table' => 'formforge_privacy_policies',
+        'submission_privacy_overrides_table' => 'formforge_submission_privacy_overrides',
     ],
 
     'models' => [
@@ -36,6 +38,8 @@ return [
         'idempotency_key' => \EvanSchleret\FormForge\Models\IdempotencyKey::class,
         'form_draft' => \EvanSchleret\FormForge\Models\FormDraft::class,
         'submission_automation_run' => \EvanSchleret\FormForge\Models\SubmissionAutomationRun::class,
+        'submission_privacy_policy' => \EvanSchleret\FormForge\Models\SubmissionPrivacyPolicy::class,
+        'submission_privacy_override' => \EvanSchleret\FormForge\Models\SubmissionPrivacyOverride::class,
     ],
 
     /*
@@ -111,6 +115,35 @@ return [
             'header' => env('FORMFORGE_TEST_HEADER', 'X-FormForge-Test'),
             // Restrict test submissions to these environments.
             'enabled_environments' => ['local', 'testing'],
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | GDPR / Privacy
+    |--------------------------------------------------------------------------
+    |
+    | Default retention/anonymization behavior for submission data.
+    | Priorities at runtime:
+    | 1. response override (manual/scheduled)
+    | 2. form policy
+    | 3. global policy (config + DB)
+    |
+    */
+
+    'gdpr' => [
+        'enabled' => true,
+        'runner' => [
+            'chunk' => 500,
+        ],
+        'default_policy' => [
+            'action' => 'none', // none|anonymize|delete
+            'after_days' => null,
+            'anonymize_fields' => [],
+            'delete_files' => false,
+            'redact_submitter' => true,
+            'redact_network' => true,
+            'enabled' => true,
         ],
     ],
 
@@ -316,8 +349,13 @@ return [
                 'revisions' => null,
                 'diff' => null,
                 'responses' => null,
+                'responses_export' => null,
                 'response' => null,
                 'response_delete' => null,
+                'gdpr_policy' => null,
+                'response_gdpr_anonymize' => null,
+                'response_gdpr_delete' => null,
+                'gdpr_run' => null,
                 'drafts' => null,
             ],
         ],

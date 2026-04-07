@@ -8,6 +8,7 @@ use EvanSchleret\FormForge\Facades\Form;
 use EvanSchleret\FormForge\FormManager;
 use EvanSchleret\FormForge\Models\FormDraft;
 use EvanSchleret\FormForge\Models\FormDefinition;
+use EvanSchleret\FormForge\Models\FormSubmission;
 use EvanSchleret\FormForge\Models\SubmissionAutomationRun;
 use EvanSchleret\FormForge\Models\StagedUpload;
 use EvanSchleret\FormForge\Automations\SubmissionAutomationDispatcher;
@@ -584,6 +585,203 @@ it('scopes management mutations and reads through Form::for owner API', function
 
     expect($latestA)->not->toBeNull();
     expect($latestB)->toBeNull();
+});
+
+it('exports submissions through facade in csv and jsonl formats', function (): void {
+    $key = 'exports_facade_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')->required();
+
+    Form::get($key, '1')->submit([
+        'name' => 'Live',
+    ]);
+
+    Form::get($key, '1')->submit(
+        payload: ['name' => 'Test'],
+        isTest: true,
+    );
+
+    $csv = Form::exportSubmissions($key, 'csv', [
+        'is_test' => '0',
+    ]);
+
+    $csvLines = array_values(array_filter(array_map(static fn (string $line): string => trim($line), explode("\n", $csv)), static fn (string $line): bool => $line !== ''));
+
+    expect($csvLines)->toHaveCount(2);
+    expect($csvLines[0])->toContain('id,form_key,form_version');
+    expect($csvLines[1])->toContain($key);
+    expect($csvLines[1])->toContain('"Live"');
+
+    $jsonl = Form::exportSubmissions($key, 'jsonl', [
+        'is_test' => '1',
+    ]);
+
+    $jsonlLines = array_values(array_filter(array_map(static fn (string $line): string => trim($line), explode("\n", $jsonl)), static fn (string $line): bool => $line !== ''));
+
+    expect($jsonlLines)->toHaveCount(1);
+
+    $decoded = json_decode($jsonlLines[0], true);
+
+    expect($decoded)->toBeArray();
+    expect($decoded['form_key'] ?? null)->toBe($key);
+    expect($decoded['is_test'] ?? null)->toBeTrue();
+    expect($decoded['payload']['name'] ?? null)->toBe('Test');
+});
+
+it('exports scoped submissions through Form::for owner API', function (): void {
+    $ownerA = ['type' => 'user', 'id' => '101'];
+    $ownerB = ['type' => 'user', 'id' => '202'];
+
+    $created = Form::for($ownerA)->create([
+        'title' => 'Scoped Export',
+        'fields' => [
+            ['type' => 'text', 'name' => 'name', 'required' => true],
+        ],
+    ]);
+
+    $key = (string) $created->key;
+
+    Form::get($key, '1')->submit([
+        'name' => 'Scoped Row',
+    ]);
+
+    $csvA = Form::for($ownerA)->exportSubmissions($key, 'csv');
+    $csvB = Form::for($ownerB)->exportSubmissions($key, 'csv');
+
+    $csvALines = array_values(array_filter(array_map(static fn (string $line): string => trim($line), explode("\n", $csvA)), static fn (string $line): bool => $line !== ''));
+    $csvBLines = array_values(array_filter(array_map(static fn (string $line): string => trim($line), explode("\n", $csvB)), static fn (string $line): bool => $line !== ''));
+
+    expect($csvALines)->toHaveCount(2);
+    expect($csvALines[1])->toContain('Scoped Row');
+    expect($csvBLines)->toHaveCount(1);
+});
+
+it('exports submissions with artisan command', function (): void {
+    $key = 'exports_command_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')->required();
+
+    Form::get($key, '1')->submit([
+        'name' => 'Command Live',
+    ]);
+
+    Form::get($key, '1')->submit(
+        payload: ['name' => 'Command Test'],
+        isTest: true,
+    );
+
+    $directory = storage_path('app/formforge-tests/exports/' . Str::lower(Str::random(8)));
+    File::ensureDirectoryExists($directory);
+    $output = $directory . '/submissions.jsonl';
+
+    $this->artisan("formforge:submissions:export {$key} --format=jsonl --is-test=1 --output={$output}")
+        ->expectsOutputToContain('Export generated:')
+        ->expectsOutputToContain('Rows exported: 1')
+        ->assertExitCode(0);
+
+    expect(File::exists($output))->toBeTrue();
+
+    $content = trim((string) File::get($output));
+    $decoded = json_decode($content, true);
+
+    expect($decoded)->toBeArray();
+    expect($decoded['form_key'] ?? null)->toBe($key);
+    expect($decoded['is_test'] ?? null)->toBeTrue();
+    expect($decoded['payload']['name'] ?? null)->toBe('Command Test');
+});
+
+it('applies form-level GDPR policy through facade run', function (): void {
+    $key = 'gdpr_form_policy_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')->required()
+        ->email('email')->required();
+
+    Form::get($key, '1')->submit([
+        'name' => 'Sensitive',
+        'email' => 'sensitive@example.com',
+    ]);
+
+    Form::setGdprFormPolicy($key, [
+        'action' => 'anonymize',
+        'after_days' => 0,
+        'anonymize_fields' => ['name'],
+        'enabled' => true,
+    ]);
+
+    $result = Form::runGdpr();
+
+    expect((int) ($result['eligible'] ?? 0))->toBe(1);
+    expect((int) ($result['anonymized'] ?? 0))->toBe(1);
+
+    $submission = FormSubmission::query()->where('form_key', $key)->first();
+
+    expect($submission)->toBeInstanceOf(FormSubmission::class);
+    expect($submission?->payload['name'] ?? null)->toBe('[redacted]');
+    expect($submission?->payload['email'] ?? null)->toBe('sensitive@example.com');
+    expect($submission?->anonymized_at)->not->toBeNull();
+});
+
+it('applies GDPR action immediately for one response through facade', function (): void {
+    $key = 'gdpr_response_now_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')->required()
+        ->email('email')->required();
+
+    $submission = Form::get($key, '1')->submit([
+        'name' => 'One-off',
+        'email' => 'one-off@example.com',
+    ]);
+
+    $result = Form::scheduleGdprResponseAction($key, (string) $submission->uuid, 'anonymize', [
+        'now' => true,
+        'fields' => ['email'],
+    ]);
+
+    expect((bool) ($result['executed'] ?? false))->toBeTrue();
+    expect((bool) ($result['anonymized'] ?? false))->toBeTrue();
+
+    $fresh = FormSubmission::query()->where('uuid', (string) $submission->uuid)->first();
+
+    expect($fresh)->toBeInstanceOf(FormSubmission::class);
+    expect($fresh?->payload['name'] ?? null)->toBe('One-off');
+    expect($fresh?->payload['email'] ?? null)->toBe('[redacted]');
+    expect($fresh?->anonymized_at)->not->toBeNull();
+});
+
+it('runs GDPR command in dry-run mode', function (): void {
+    $key = 'gdpr_dry_run_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')->required();
+
+    Form::get($key, '1')->submit([
+        'name' => 'Dry run',
+    ]);
+
+    Form::setGdprFormPolicy($key, [
+        'action' => 'anonymize',
+        'after_days' => 0,
+        'enabled' => true,
+    ]);
+
+    $this->artisan('formforge:gdpr:run --dry-run')
+        ->expectsOutputToContain('GDPR dry-run completed.')
+        ->assertExitCode(0);
+
+    $submission = FormSubmission::query()->where('form_key', $key)->first();
+
+    expect($submission)->toBeInstanceOf(FormSubmission::class);
+    expect($submission?->payload['name'] ?? null)->toBe('Dry run');
+    expect($submission?->anonymized_at)->toBeNull();
 });
 
 it('merges published config with latest defaults without losing project overrides', function (): void {

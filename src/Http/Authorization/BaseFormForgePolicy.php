@@ -141,6 +141,11 @@ class BaseFormForgePolicy
         return false;
     }
 
+    public function management_responses_export(mixed $user, FormForgeAuthorizationContext $context): bool
+    {
+        return false;
+    }
+
     public function management_response(mixed $user, FormForgeAuthorizationContext $context): bool
     {
         return false;
@@ -150,5 +155,24 @@ class BaseFormForgePolicy
     {
         return false;
     }
-}
 
+    public function management_gdpr_policy(mixed $user, FormForgeAuthorizationContext $context): bool
+    {
+        return false;
+    }
+
+    public function management_response_gdpr_anonymize(mixed $user, FormForgeAuthorizationContext $context): bool
+    {
+        return false;
+    }
+
+    public function management_response_gdpr_delete(mixed $user, FormForgeAuthorizationContext $context): bool
+    {
+        return false;
+    }
+
+    public function management_gdpr_run(mixed $user, FormForgeAuthorizationContext $context): bool
+    {
+        return false;
+    }
+}

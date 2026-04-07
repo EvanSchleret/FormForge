@@ -963,6 +963,129 @@ it('deletes one form response through management endpoint', function (): void {
     ]);
 });
 
+it('exports form responses through management endpoint as csv with filters', function (): void {
+    $key = 'responses_export_csv_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')->required();
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'name' => 'Live Row',
+    ])->assertCreated();
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'name' => 'Test Row',
+        '_formforge_test' => true,
+    ])->assertCreated();
+
+    $response = $this->get("/api/formforge/v1/forms/{$key}/responses/export?format=csv&is_test=0");
+
+    $response->assertOk();
+    $response->assertHeader('content-type', 'text/csv; charset=UTF-8');
+
+    $content = $response->streamedContent();
+    $lines = array_values(array_filter(array_map(static fn (string $line): string => trim($line), explode("\n", $content)), static fn (string $line): bool => $line !== ''));
+
+    expect($lines)->toHaveCount(2);
+    expect($lines[0])->toContain('id,form_key,form_version');
+    expect($lines[1])->toContain($key);
+    expect($lines[1])->toContain('"Live Row"');
+});
+
+it('exports form responses through management endpoint as jsonl', function (): void {
+    $key = 'responses_export_jsonl_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')->required();
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'name' => 'Alpha',
+    ])->assertCreated();
+
+    $response = $this->get("/api/formforge/v1/forms/{$key}/responses/export?format=jsonl");
+
+    $response->assertOk();
+    $response->assertHeader('content-type', 'application/x-ndjson');
+
+    $content = trim($response->streamedContent());
+    $decoded = json_decode($content, true);
+
+    expect($decoded)->toBeArray();
+    expect($decoded['form_key'] ?? null)->toBe($key);
+    expect($decoded['payload']['name'] ?? null)->toBe('Alpha');
+});
+
+it('configures form GDPR policy and runs GDPR engine through management endpoints', function (): void {
+    $key = 'gdpr_http_policy_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')->required()
+        ->email('email')->required();
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'name' => 'Policy User',
+        'email' => 'policy@example.com',
+    ])->assertCreated();
+
+    $this->putJson("/api/formforge/v1/forms/{$key}/gdpr-policy", [
+        'action' => 'anonymize',
+        'after_days' => 0,
+        'anonymize_fields' => ['name'],
+        'enabled' => true,
+    ])
+        ->assertOk()
+        ->assertJsonPath('data.action', 'anonymize')
+        ->assertJsonPath('data.form_key', $key);
+
+    $this->postJson('/api/formforge/v1/gdpr/run', [
+        'dry_run' => false,
+        'chunk' => 100,
+    ])
+        ->assertOk()
+        ->assertJsonPath('data.eligible', 1)
+        ->assertJsonPath('data.anonymized', 1);
+
+    $row = \EvanSchleret\FormForge\Models\FormSubmission::query()
+        ->where('form_key', $key)
+        ->first();
+
+    expect($row)->toBeInstanceOf(\EvanSchleret\FormForge\Models\FormSubmission::class);
+    expect($row?->payload['name'] ?? null)->toBe('[redacted]');
+    expect($row?->payload['email'] ?? null)->toBe('policy@example.com');
+});
+
+it('anonymizes one response through management endpoint', function (): void {
+    $key = 'gdpr_http_response_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')->required()
+        ->email('email')->required();
+
+    $submit = $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'name' => 'Target User',
+        'email' => 'target@example.com',
+    ])->assertCreated();
+
+    $submissionUuid = (string) $submit->json('data.id');
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/responses/{$submissionUuid}/gdpr/anonymize", [
+        'fields' => ['email'],
+        'now' => true,
+    ])
+        ->assertOk()
+        ->assertJsonPath('data.executed', true)
+        ->assertJsonPath('data.anonymized', true);
+
+    $this->getJson("/api/formforge/v1/forms/{$key}/responses/{$submissionUuid}")
+        ->assertOk()
+        ->assertJsonPath('data.payload.name', 'Target User')
+        ->assertJsonPath('data.payload.email', '[redacted]');
+});
+
 it('creates a seeded draft form with default page and short_text field when empty', function (): void {
     $response = $this->postJson('/api/formforge/v1/forms', [
         'title' => 'Empty Draft',
@@ -1203,6 +1326,59 @@ it('supports management response delete ability authorization', function (): voi
     $this->actingAs($allowed)->deleteJson("/api/formforge/v1/forms/{$key}/responses/{$submissionUuid}")
         ->assertOk()
         ->assertJsonPath('data.deleted', true);
+});
+
+it('supports management responses export ability authorization', function (): void {
+    config()->set('formforge.http.management.auth', 'required');
+    config()->set('formforge.http.management.abilities.responses_export', 'formforge.responses-export');
+
+    Gate::define('formforge.responses-export', static fn (?User $user): bool => $user !== null && $user->name === 'allowed');
+
+    $key = 'responses_export_ability_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')->required();
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'name' => 'Alpha',
+    ])->assertCreated();
+
+    $this->getJson("/api/formforge/v1/forms/{$key}/responses/export?format=csv")
+        ->assertUnauthorized();
+
+    $denied = User::query()->create(['name' => 'denied']);
+
+    $this->actingAs($denied)->getJson("/api/formforge/v1/forms/{$key}/responses/export?format=csv")
+        ->assertForbidden();
+
+    $allowed = User::query()->create(['name' => 'allowed']);
+
+    $this->actingAs($allowed)->getJson("/api/formforge/v1/forms/{$key}/responses/export?format=csv")
+        ->assertOk();
+});
+
+it('supports management GDPR run ability authorization', function (): void {
+    config()->set('formforge.http.management.auth', 'required');
+    config()->set('formforge.http.management.abilities.gdpr_run', 'formforge.gdpr-run');
+
+    Gate::define('formforge.gdpr-run', static fn (?User $user): bool => $user !== null && $user->name === 'allowed');
+
+    $this->postJson('/api/formforge/v1/gdpr/run', [
+        'dry_run' => true,
+    ])->assertUnauthorized();
+
+    $denied = User::query()->create(['name' => 'denied']);
+
+    $this->actingAs($denied)->postJson('/api/formforge/v1/gdpr/run', [
+        'dry_run' => true,
+    ])->assertForbidden();
+
+    $allowed = User::query()->create(['name' => 'allowed']);
+
+    $this->actingAs($allowed)->postJson('/api/formforge/v1/gdpr/run', [
+        'dry_run' => true,
+    ])->assertOk();
 });
 
 it('keeps deleted forms readable through revisions endpoint for admin flows', function (): void {

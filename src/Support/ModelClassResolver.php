@@ -13,6 +13,8 @@ use EvanSchleret\FormForge\Models\IdempotencyKey;
 use EvanSchleret\FormForge\Models\StagedUpload;
 use EvanSchleret\FormForge\Models\SubmissionAutomationRun;
 use EvanSchleret\FormForge\Models\SubmissionFile;
+use EvanSchleret\FormForge\Models\SubmissionPrivacyOverride;
+use EvanSchleret\FormForge\Models\SubmissionPrivacyPolicy;
 
 class ModelClassResolver
 {
@@ -54,6 +56,16 @@ class ModelClassResolver
     public static function submissionAutomationRun(): string
     {
         return self::resolve('submission_automation_run', SubmissionAutomationRun::class);
+    }
+
+    public static function submissionPrivacyPolicy(): string
+    {
+        return self::resolve('submission_privacy_policy', SubmissionPrivacyPolicy::class);
+    }
+
+    public static function submissionPrivacyOverride(): string
+    {
+        return self::resolve('submission_privacy_override', SubmissionPrivacyOverride::class);
     }
 
     private static function resolve(string $configKey, string $default): string

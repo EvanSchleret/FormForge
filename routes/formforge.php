@@ -120,8 +120,13 @@ $registerRoutes = static function (?string $scopeName, callable $isEndpointEnabl
         Route::middleware($routeMiddleware('management', 'revisions', $scopeName))->get('/forms/{key}/revisions', [$managementController, 'revisions']);
         Route::middleware($routeMiddleware('management', 'diff', $scopeName))->get('/forms/{key}/diff/{fromVersion}/{toVersion}', [$managementController, 'diff']);
         Route::middleware($routeMiddleware('management', 'responses', $scopeName))->get('/forms/{key}/responses', [$managementController, 'responses']);
+        Route::middleware($routeMiddleware('management', 'responses_export', $scopeName))->get('/forms/{key}/responses/export', [$managementController, 'exportResponses']);
+        Route::middleware($routeMiddleware('management', 'gdpr_policy', $scopeName))->put('/forms/{key}/gdpr-policy', [$managementController, 'upsertGdprPolicy']);
         Route::middleware($routeMiddleware('management', 'response', $scopeName))->get('/forms/{key}/responses/{submissionUuid}', [$managementController, 'response']);
         Route::middleware($routeMiddleware('management', 'response_delete', $scopeName))->delete('/forms/{key}/responses/{submissionUuid}', [$managementController, 'deleteResponse']);
+        Route::middleware($routeMiddleware('management', 'response_gdpr_anonymize', $scopeName))->post('/forms/{key}/responses/{submissionUuid}/gdpr/anonymize', [$managementController, 'anonymizeResponse']);
+        Route::middleware($routeMiddleware('management', 'response_gdpr_delete', $scopeName))->post('/forms/{key}/responses/{submissionUuid}/gdpr/delete', [$managementController, 'deleteResponseByGdpr']);
+        Route::middleware($routeMiddleware('management', 'gdpr_run', $scopeName))->post('/gdpr/run', [$managementController, 'runGdpr']);
     }
 };
 
