@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace EvanSchleret\FormForge\Automations;
 
 use EvanSchleret\FormForge\Automations\Contracts\SubmissionAutomation;
+use EvanSchleret\FormForge\Automations\Contracts\SubmissionAutomationResolver;
 use EvanSchleret\FormForge\Exceptions\FormForgeException;
 
 class AutomationBuilder
@@ -16,9 +17,11 @@ class AutomationBuilder
     private ?string $connection;
 
     public function __construct(
-        private readonly string $formKey,
+        private readonly string $targetType,
+        private readonly string $targetValue,
         private readonly AutomationRegistry $registry,
     ) {
+        $this->validateTarget();
         $this->queued = (bool) config('formforge.automations.queue.enabled', true);
         $this->queue = $this->normalizeOptionalString(config('formforge.automations.queue.name'));
         $this->connection = $this->normalizeOptionalString(config('formforge.automations.queue.connection'));
@@ -57,7 +60,8 @@ class AutomationBuilder
         $key = $this->normalizeOptionalString($automationKey) ?? $this->defaultAutomationKey($handlerClass);
 
         $this->registry->register(new AutomationDefinition(
-            formKey: $this->formKey,
+            targetType: $this->targetType,
+            targetValue: $this->targetValue,
             automationKey: $key,
             handlerClass: $handlerClass,
             queued: $this->queued,
@@ -77,7 +81,7 @@ class AutomationBuilder
         $candidate = $base;
         $counter = 2;
 
-        while ($this->registry->has($this->formKey, $candidate)) {
+        while ($this->registry->hasForTarget($this->targetType, $this->targetValue, $candidate)) {
             $candidate = $base . '_' . $counter;
             $counter++;
         }
@@ -94,5 +98,24 @@ class AutomationBuilder
         $value = trim($value);
 
         return $value === '' ? null : $value;
+    }
+
+    private function validateTarget(): void
+    {
+        if (! in_array($this->targetType, [AutomationDefinition::TARGET_FORM, AutomationDefinition::TARGET_RESOLVER], true)) {
+            throw new FormForgeException("Automation target type [{$this->targetType}] is invalid.");
+        }
+
+        if ($this->targetValue === '') {
+            throw new FormForgeException('Automation target value cannot be empty.');
+        }
+
+        if ($this->targetType !== AutomationDefinition::TARGET_RESOLVER) {
+            return;
+        }
+
+        if (! class_exists($this->targetValue) || ! is_subclass_of($this->targetValue, SubmissionAutomationResolver::class)) {
+            throw new FormForgeException("Automation resolver [{$this->targetValue}] must implement [" . SubmissionAutomationResolver::class . '].');
+        }
     }
 }

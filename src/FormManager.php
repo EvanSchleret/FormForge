@@ -151,6 +151,11 @@ class FormManager
         return $this->automationRegistry->forForm($formKey);
     }
 
+    public function automationForResolver(string $resolverClass): AutomationBuilder
+    {
+        return $this->automationRegistry->forResolver($resolverClass);
+    }
+
     public function sync(): array
     {
         $schemas = $this->runtimeSchemasForSync();

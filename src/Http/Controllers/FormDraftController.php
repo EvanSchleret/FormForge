@@ -19,8 +19,10 @@ use Illuminate\Auth\AuthenticationException;
 
 class FormDraftController
 {
-    public function save(Request $request, FormManager $forms, DraftStateService $drafts, string $key): JsonResponse
+    public function save(Request $request, FormManager $forms, DraftStateService $drafts): JsonResponse
     {
+        $key = $this->routeRequired($request, 'key');
+
         try {
             $form = $this->resolveForm($request, $forms, $key);
             $owner = $this->resolveOwner($request);
@@ -38,8 +40,10 @@ class FormDraftController
         ]);
     }
 
-    public function current(Request $request, FormManager $forms, DraftStateService $drafts, string $key): JsonResponse
+    public function current(Request $request, FormManager $forms, DraftStateService $drafts): JsonResponse
     {
+        $key = $this->routeRequired($request, 'key');
+
         try {
             $form = $this->resolveForm($request, $forms, $key);
             $owner = $this->resolveOwner($request);
@@ -57,8 +61,10 @@ class FormDraftController
         ]);
     }
 
-    public function delete(Request $request, FormManager $forms, DraftStateService $drafts, string $key): JsonResponse
+    public function delete(Request $request, FormManager $forms, DraftStateService $drafts): JsonResponse
     {
+        $key = $this->routeRequired($request, 'key');
+
         try {
             $form = $this->resolveForm($request, $forms, $key);
             $owner = $this->resolveOwner($request);
@@ -141,5 +147,32 @@ class FormDraftController
             'created_at' => $draft->created_at?->toIso8601String(),
             'updated_at' => $draft->updated_at?->toIso8601String(),
         ];
+    }
+
+    private function routeRequired(Request $request, string $name): string
+    {
+        $attribute = $request->attributes->get('formforge.route.' . $name);
+
+        if (is_scalar($attribute)) {
+            $resolved = trim((string) $attribute);
+
+            if ($resolved !== '') {
+                return $resolved;
+            }
+        }
+
+        $value = $request->route($name);
+
+        if (! is_scalar($value)) {
+            throw new NotFoundHttpException("Route parameter [{$name}] is required.");
+        }
+
+        $resolved = trim((string) $value);
+
+        if ($resolved === '') {
+            throw new NotFoundHttpException("Route parameter [{$name}] is required.");
+        }
+
+        return $resolved;
     }
 }

@@ -16,8 +16,9 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class FormSubmissionController
 {
-    public function submitLatest(Request $request, FormManager $forms, SubmissionHttpResource $resources, string $key): JsonResponse
+    public function submitLatest(Request $request, FormManager $forms, SubmissionHttpResource $resources): JsonResponse
     {
+        $key = $this->routeRequired($request, 'key');
         $version = $request->input('version');
 
         if (! is_string($version) || trim($version) === '') {
@@ -27,8 +28,11 @@ class FormSubmissionController
         return $this->submit($request, $forms, $resources, $key, $version);
     }
 
-    public function submitVersion(Request $request, FormManager $forms, SubmissionHttpResource $resources, string $key, string $version): JsonResponse
+    public function submitVersion(Request $request, FormManager $forms, SubmissionHttpResource $resources): JsonResponse
     {
+        $key = $this->routeRequired($request, 'key');
+        $version = $this->routeRequired($request, 'version');
+
         return $this->submit($request, $forms, $resources, $key, $version);
     }
 
@@ -224,5 +228,32 @@ class FormSubmissionController
         }
 
         return app()->environment($environments);
+    }
+
+    private function routeRequired(Request $request, string $name): string
+    {
+        $attribute = $request->attributes->get('formforge.route.' . $name);
+
+        if (is_scalar($attribute)) {
+            $resolved = trim((string) $attribute);
+
+            if ($resolved !== '') {
+                return $resolved;
+            }
+        }
+
+        $value = $request->route($name);
+
+        if (! is_scalar($value)) {
+            throw new NotFoundHttpException("Route parameter [{$name}] is required.");
+        }
+
+        $resolved = trim((string) $value);
+
+        if ($resolved === '') {
+            throw new NotFoundHttpException("Route parameter [{$name}] is required.");
+        }
+
+        return $resolved;
     }
 }

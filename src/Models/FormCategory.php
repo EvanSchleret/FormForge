@@ -39,4 +39,9 @@ class FormCategory extends Model
     {
         return $query->where('key', $key);
     }
+
+    public function scopeBySlug(Builder $query, string $slug): Builder
+    {
+        return $query->where('slug', $slug);
+    }
 }

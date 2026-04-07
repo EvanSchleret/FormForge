@@ -13,8 +13,9 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class FormResolveController
 {
-    public function resolveLatest(Request $request, FormManager $forms, string $key): JsonResponse
+    public function resolveLatest(Request $request, FormManager $forms): JsonResponse
     {
+        $key = $this->routeRequired($request, 'key');
         $version = $request->input('version');
 
         if (! is_string($version) || trim($version) === '') {
@@ -24,8 +25,11 @@ class FormResolveController
         return $this->resolve($request, $forms, $key, $version);
     }
 
-    public function resolveVersion(Request $request, FormManager $forms, string $key, string $version): JsonResponse
+    public function resolveVersion(Request $request, FormManager $forms): JsonResponse
     {
+        $key = $this->routeRequired($request, 'key');
+        $version = $this->routeRequired($request, 'version');
+
         return $this->resolve($request, $forms, $key, $version);
     }
 
@@ -72,5 +76,32 @@ class FormResolveController
         }
 
         return app()->environment($environments);
+    }
+
+    private function routeRequired(Request $request, string $name): string
+    {
+        $attribute = $request->attributes->get('formforge.route.' . $name);
+
+        if (is_scalar($attribute)) {
+            $resolved = trim((string) $attribute);
+
+            if ($resolved !== '') {
+                return $resolved;
+            }
+        }
+
+        $value = $request->route($name);
+
+        if (! is_scalar($value)) {
+            throw new NotFoundHttpException("Route parameter [{$name}] is required.");
+        }
+
+        $resolved = trim((string) $value);
+
+        if ($resolved === '') {
+            throw new NotFoundHttpException("Route parameter [{$name}] is required.");
+        }
+
+        return $resolved;
     }
 }

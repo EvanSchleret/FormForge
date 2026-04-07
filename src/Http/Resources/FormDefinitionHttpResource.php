@@ -29,6 +29,7 @@ class FormDefinitionHttpResource extends JsonResource
             ? [
                 'id' => (int) $category->getKey(),
                 'key' => (string) $category->key,
+                'slug' => is_string($category->slug) ? trim((string) $category->slug) : null,
                 'name' => (string) $category->name,
                 'description' => $category->description,
                 'is_active' => (bool) $category->is_active,

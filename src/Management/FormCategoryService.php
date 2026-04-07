@@ -10,6 +10,7 @@ use EvanSchleret\FormForge\Models\FormCategory;
 use EvanSchleret\FormForge\Support\ModelClassResolver;
 use EvanSchleret\FormForge\Ownership\OwnershipManager;
 use EvanSchleret\FormForge\Ownership\OwnershipReference;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Str;
 
@@ -34,7 +35,7 @@ class FormCategoryService
     {
         $query = $this->categoryModelClass()::query()
             ->orderBy('key');
-        $this->ownership->applyScope($query, $owner);
+        $this->applyOwnerOrSystemScope($query, $owner);
 
         $search = $this->normalizedOptionalString($filters['search'] ?? null);
 
@@ -42,6 +43,7 @@ class FormCategoryService
             $query->where(function ($builder) use ($search): void {
                 $builder
                     ->where('key', 'like', '%' . $search . '%')
+                    ->orWhere('slug', 'like', '%' . $search . '%')
                     ->orWhere('name', 'like', '%' . $search . '%')
                     ->orWhere('description', 'like', '%' . $search . '%');
             });
@@ -60,9 +62,58 @@ class FormCategoryService
     {
         $query = $this->categoryModelClass()::query()
             ->where('key', trim($key));
-        $this->ownership->applyScope($query, $owner);
+        $this->applyOwnerOrSystemScope($query, $owner);
 
         return $query->first();
+    }
+
+    public function findBySlug(string $slug, ?OwnershipReference $owner = null): ?FormCategory
+    {
+        $normalized = $this->normalizedSlug($slug);
+
+        if ($normalized === null) {
+            return null;
+        }
+
+        if ($owner instanceof OwnershipReference) {
+            $owned = $this->categoryModelClass()::query()
+                ->where('slug', $normalized)
+                ->where('owner_type', $owner->type)
+                ->where('owner_id', $owner->id)
+                ->first();
+
+            if ($owned instanceof FormCategory) {
+                return $owned;
+            }
+
+            return $this->categoryModelClass()::query()
+                ->where('slug', $normalized)
+                ->where('is_system', true)
+                ->whereNull('owner_type')
+                ->whereNull('owner_id')
+                ->first();
+        }
+
+        return $this->categoryModelClass()::query()
+            ->where('slug', $normalized)
+            ->first();
+    }
+
+    public function findByIdentifier(string $identifier, ?OwnershipReference $owner = null): ?FormCategory
+    {
+        $identifier = trim($identifier);
+
+        if ($identifier === '') {
+            return null;
+        }
+
+        $byKey = $this->findByKey($identifier, $owner);
+
+        if ($byKey instanceof FormCategory) {
+            return $byKey;
+        }
+
+        return $this->findBySlug($identifier, $owner);
     }
 
     public function ensureForForms(?string $key, ?OwnershipReference $owner = null): ?FormCategory
@@ -73,7 +124,7 @@ class FormCategoryService
             return $this->ensureDefaultCategory($owner);
         }
 
-        $existing = $this->findByKey($normalized, $owner);
+        $existing = $this->findByIdentifier($normalized, $owner);
 
         if ($existing instanceof FormCategory) {
             return $existing;
@@ -102,8 +153,20 @@ class FormCategoryService
             $isSystem = $resolved;
         }
 
+        $requestedSlug = array_key_exists('slug', $input)
+            ? $this->normalizedSlug($input['slug'])
+            : null;
+
+        if (array_key_exists('slug', $input) && $requestedSlug === null) {
+            throw new FormForgeException('Category slug cannot be empty.');
+        }
+
+        $baseSlug = $requestedSlug ?? $this->normalizedSlug($name) ?? 'category';
+        $slug = $this->uniqueSlug($baseSlug, owner: $owner);
+
         $category = $this->categoryModelClass()::query()->make([
             'key' => (string) Str::uuid(),
+            'slug' => $slug,
             'name' => $name,
             'description' => $this->nullableDescription($input['description'] ?? null),
             'meta' => $this->normalizedArray($input['meta'] ?? []),
@@ -133,6 +196,17 @@ class FormCategoryService
             }
 
             $category->name = $name;
+        }
+
+        if (array_key_exists('slug', $input)) {
+            $requestedSlug = $this->normalizedSlug($input['slug']);
+
+            if ($requestedSlug === null) {
+                throw new FormForgeException('Category slug cannot be empty.');
+            }
+
+            $categoryOwner = $this->ownership->fromModel($category);
+            $category->slug = $this->uniqueSlug($requestedSlug, (int) $category->getKey(), $categoryOwner);
         }
 
         if (array_key_exists('description', $input)) {
@@ -197,6 +271,7 @@ class FormCategoryService
         return [
             'id' => (int) $category->getKey(),
             'key' => (string) $category->key,
+            'slug' => $this->normalizedOptionalString($category->slug),
             'name' => (string) $category->name,
             'description' => $category->description,
             'is_active' => (bool) $category->is_active,
@@ -211,28 +286,51 @@ class FormCategoryService
 
     private function ensureDefaultCategory(?OwnershipReference $owner = null): FormCategory
     {
-        $defaultName = trim((string) config('formforge.forms.default_category', 'general'));
+        $default = trim((string) config('formforge.forms.default_category', 'general'));
 
-        if ($defaultName === '') {
-            $defaultName = 'general';
+        if ($default === '') {
+            $default = 'general';
+        }
+
+        $defaultName = $default;
+        $defaultSlug = $this->normalizedSlug($default) ?? 'general';
+
+        $bySlugQuery = $this->categoryModelClass()::query()
+            ->where('slug', $defaultSlug);
+        $this->applyOwnerOrSystemScope($bySlugQuery, $owner);
+        $bySlug = $bySlugQuery->first();
+
+        if ($bySlug instanceof FormCategory) {
+            if (! (bool) ($bySlug->is_system ?? false)) {
+                $bySlug->is_system = true;
+                $bySlug->save();
+            }
+
+            return $bySlug;
         }
 
         $query = $this->categoryModelClass()::query()
             ->whereRaw('LOWER(name) = ?', [strtolower($defaultName)]);
-        $this->ownership->applyScope($query, $owner);
+        $this->applyOwnerOrSystemScope($query, $owner);
         $existing = $query->first();
 
         if ($existing instanceof FormCategory) {
+            if ($this->normalizedOptionalString($existing->slug) === null) {
+                $existing->slug = $this->uniqueSlug($defaultSlug, (int) $existing->getKey(), $owner);
+            }
+
             if (! (bool) ($existing->is_system ?? false)) {
                 $existing->is_system = true;
-                $existing->save();
             }
+
+            $existing->save();
 
             return $existing;
         }
 
         $category = $this->categoryModelClass()::query()->make([
             'key' => (string) Str::uuid(),
+            'slug' => $this->uniqueSlug($defaultSlug, owner: $owner),
             'name' => $defaultName,
             'description' => null,
             'meta' => ['default' => true],
@@ -302,5 +400,91 @@ class FormCategoryService
         }
 
         return null;
+    }
+
+    private function normalizedSlug(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $value = trim($value);
+
+        if ($value === '') {
+            return null;
+        }
+
+        $slug = trim((string) Str::slug($value), '-');
+
+        return $slug === '' ? null : $slug;
+    }
+
+    private function uniqueSlug(string $baseSlug, ?int $ignoreId = null, ?OwnershipReference $owner = null): string
+    {
+        $candidate = $baseSlug;
+        $counter = 2;
+
+        while ($this->slugExists($candidate, $ignoreId, $owner)) {
+            $candidate = $baseSlug . '-' . $counter;
+            $counter++;
+        }
+
+        return $candidate;
+    }
+
+    private function slugExists(string $slug, ?int $ignoreId = null, ?OwnershipReference $owner = null): bool
+    {
+        $query = $this->categoryModelClass()::query()->where('slug', $slug);
+
+        if (is_int($ignoreId) && $ignoreId > 0) {
+            $query->whereKeyNot($ignoreId);
+        }
+
+        if (! $owner instanceof OwnershipReference) {
+            $query
+                ->whereNull('owner_type')
+                ->whereNull('owner_id');
+
+            return $query->exists();
+        }
+
+        $query->where(static function (Builder $builder) use ($owner): void {
+            $builder
+                ->where(static function (Builder $owned) use ($owner): void {
+                    $owned
+                        ->where('owner_type', $owner->type)
+                        ->where('owner_id', $owner->id);
+                })
+                ->orWhere(static function (Builder $system): void {
+                    $system
+                        ->where('is_system', true)
+                        ->whereNull('owner_type')
+                        ->whereNull('owner_id');
+                });
+        });
+
+        return $query->exists();
+    }
+
+    private function applyOwnerOrSystemScope(Builder $query, ?OwnershipReference $owner): void
+    {
+        if (! $owner instanceof OwnershipReference) {
+            return;
+        }
+
+        $query->where(static function (Builder $builder) use ($owner): void {
+            $builder
+                ->where(static function (Builder $scoped) use ($owner): void {
+                    $scoped
+                        ->where('owner_type', $owner->type)
+                        ->where('owner_id', $owner->id);
+                })
+                ->orWhere(static function (Builder $system): void {
+                    $system
+                        ->where('is_system', true)
+                        ->whereNull('owner_type')
+                        ->whereNull('owner_id');
+                });
+        });
     }
 }

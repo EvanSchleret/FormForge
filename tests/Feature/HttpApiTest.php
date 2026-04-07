@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 use EvanSchleret\FormForge\Facades\Form;
 use EvanSchleret\FormForge\Http\Authorization\FormForgeAuthorizationContext;
+use EvanSchleret\FormForge\Models\FormCategory;
 use EvanSchleret\FormForge\Ownership\NullOwnershipResolver;
 use EvanSchleret\FormForge\Tests\Fixtures\Controllers\CustomFormManagementController;
 use EvanSchleret\FormForge\Tests\Fixtures\FormForgeOwnershipResolver;
 use EvanSchleret\FormForge\Tests\Fixtures\MarkSubmissionMiddleware;
+use EvanSchleret\FormForge\Tests\Fixtures\MutateRouteKeyMiddleware;
 use EvanSchleret\FormForge\Tests\Fixtures\Policies\UserScopedFormForgePolicy;
 use EvanSchleret\FormForge\Tests\Fixtures\User;
 use EvanSchleret\FormForge\Tests\Fixtures\UserSummaryResource;
@@ -404,6 +406,46 @@ it('supports scoped management routes with gate authorization', function (): voi
         ->assertForbidden();
 });
 
+it('uses original route form key when middleware mutates key parameter', function (): void {
+    app('router')->aliasMiddleware('formforge.test.mutate.key', MutateRouteKeyMiddleware::class);
+
+    config()->set('formforge.http.endpoints.schema', false);
+    config()->set('formforge.http.scoped_routes', [[
+        'name' => 'user',
+        'prefix' => 'users/{user}',
+        'middleware' => ['formforge.test.mutate.key'],
+        'owner' => [
+            'route_param' => 'user',
+            'model' => User::class,
+        ],
+        'authorization' => [
+            'mode' => 'none',
+        ],
+        'endpoints' => [
+            'schema' => true,
+            'management' => false,
+            'submission' => false,
+            'upload' => false,
+            'resolve' => false,
+            'draft' => false,
+        ],
+    ]]);
+
+    $this->app['router']->setRoutes(new RouteCollection());
+    require dirname(__DIR__, 2) . '/routes/formforge.php';
+
+    $user = User::query()->create(['name' => 'Owner']);
+    $key = 'scoped_schema_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')->required();
+
+    $this->getJson("/api/formforge/v1/users/{$user->getKey()}/forms/{$key}")
+        ->assertOk()
+        ->assertJsonPath('data.key', $key);
+});
+
 it('fails closed on management endpoints when ownership is enabled and unresolved', function (): void {
     config()->set('formforge.ownership.enabled', true);
     config()->set('formforge.ownership.required', false);
@@ -516,7 +558,7 @@ it('creates a form revision through management endpoint', function (): void {
         'name' => 'Contact',
     ])->assertCreated();
 
-    $categoryKey = (string) $category->json('data.key');
+    $categorySlug = (string) $category->json('data.slug');
 
     $response = $this->postJson('/api/formforge/v1/forms', [
         'title' => 'Contact Form',
@@ -527,7 +569,7 @@ it('creates a form revision through management endpoint', function (): void {
                 'required' => true,
             ],
         ],
-        'category' => $categoryKey,
+        'category' => $categorySlug,
     ]);
 
     $response
@@ -611,6 +653,45 @@ it('lists forms through paginated management endpoint', function (): void {
         ]);
 });
 
+it('filters forms by category slug on management endpoint', function (): void {
+    $surveyCategory = $this->postJson('/api/formforge/v1/categories', [
+        'name' => 'Survey',
+    ])->assertCreated();
+
+    $contactCategory = $this->postJson('/api/formforge/v1/categories', [
+        'name' => 'Contact',
+    ])->assertCreated();
+
+    $surveyCategoryKey = (string) $surveyCategory->json('data.key');
+    $surveyCategorySlug = (string) $surveyCategory->json('data.slug');
+    $contactCategoryKey = (string) $contactCategory->json('data.key');
+
+    $surveyCreate = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Survey Form',
+        'fields' => [['type' => 'text', 'name' => 'name']],
+        'category' => $surveyCategoryKey,
+    ])->assertCreated();
+
+    $contactCreate = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Contact Form',
+        'fields' => [['type' => 'email', 'name' => 'email']],
+        'category' => $contactCategoryKey,
+    ])->assertCreated();
+
+    $surveyFormKey = (string) $surveyCreate->json('data.key');
+    $contactFormKey = (string) $contactCreate->json('data.key');
+
+    $this->getJson('/api/formforge/v1/forms?category=' . urlencode($surveyCategorySlug))
+        ->assertOk()
+        ->assertJsonPath('meta.total', 1)
+        ->assertJsonPath('data.data.0.key', $surveyFormKey);
+
+    $this->getJson('/api/formforge/v1/forms?category=' . urlencode($contactCategoryKey))
+        ->assertOk()
+        ->assertJsonPath('meta.total', 1)
+        ->assertJsonPath('data.data.0.key', $contactFormKey);
+});
+
 it('manages form categories through HTTP endpoints', function (): void {
     $create = $this->postJson('/api/formforge/v1/categories', [
         'name' => 'Customer Survey',
@@ -620,6 +701,7 @@ it('manages form categories through HTTP endpoints', function (): void {
     $create
         ->assertCreated()
         ->assertJsonPath('data.name', 'Customer Survey')
+        ->assertJsonPath('data.slug', 'customer-survey')
         ->assertJsonPath('data.is_active', true)
         ->assertJsonPath('data.is_system', false);
 
@@ -638,10 +720,12 @@ it('manages form categories through HTTP endpoints', function (): void {
     $this->patchJson("/api/formforge/v1/categories/{$categoryKey}", [
         'description' => 'Updated description',
         'is_active' => false,
+        'slug' => 'customer-survey-updated',
     ])
         ->assertOk()
         ->assertJsonPath('data.description', 'Updated description')
-        ->assertJsonPath('data.is_active', false);
+        ->assertJsonPath('data.is_active', false)
+        ->assertJsonPath('data.slug', 'customer-survey-updated');
 
     $this->postJson('/api/formforge/v1/forms', [
         'title' => 'Survey Form',
@@ -741,6 +825,38 @@ it('scopes management forms and categories by ownership context', function (): v
             ['type' => 'text', 'name' => 'name'],
         ],
     ])->assertStatus(422);
+});
+
+it('includes global system categories in scoped category listing', function (): void {
+    config()->set('formforge.ownership.enabled', true);
+    config()->set('formforge.ownership.required', true);
+    config()->set('formforge.ownership.endpoints', ['management']);
+    config()->set('formforge.ownership.resolver', FormForgeOwnershipResolver::class);
+
+    $systemCategory = FormCategory::query()->create([
+        'key' => (string) Str::uuid(),
+        'name' => 'System Core',
+        'description' => null,
+        'meta' => [],
+        'is_active' => true,
+        'is_system' => true,
+        'owner_type' => null,
+        'owner_id' => null,
+    ]);
+
+    $ownerHeaders = [
+        'X-FormForge-Owner-Type' => 'user',
+        'X-FormForge-Owner-Id' => '1',
+    ];
+
+    $this->withHeaders($ownerHeaders)->getJson('/api/formforge/v1/categories')
+        ->assertOk()
+        ->assertJsonFragment([
+            'key' => (string) $systemCategory->key,
+            'is_system' => true,
+            'owner_type' => null,
+            'owner_id' => null,
+        ]);
 });
 
 it('lists form responses through paginated management endpoint', function (): void {

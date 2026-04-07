@@ -15,6 +15,7 @@ use EvanSchleret\FormForge\Commands\InstallCommand;
 use EvanSchleret\FormForge\Commands\InstallMergeCommand;
 use EvanSchleret\FormForge\Commands\ListCommand;
 use EvanSchleret\FormForge\Commands\MakeAutomationCommand;
+use EvanSchleret\FormForge\Commands\MakeAutomationResolverCommand;
 use EvanSchleret\FormForge\Commands\MakeHttpControllerCommand;
 use EvanSchleret\FormForge\Commands\MakePolicyCommand;
 use EvanSchleret\FormForge\Commands\SyncCommand;
@@ -60,7 +61,12 @@ class FormForgeServiceProvider extends ServiceProvider
         ));
         $this->app->singleton(IdempotencyService::class, static fn (): IdempotencyService => new IdempotencyService());
         $this->app->singleton(SubmissionValidator::class, static fn (): SubmissionValidator => new SubmissionValidator());
-        $this->app->singleton(SubmissionReadService::class, static fn (): SubmissionReadService => new SubmissionReadService());
+        $this->app->singleton(
+            SubmissionReadService::class,
+            fn (): SubmissionReadService => new SubmissionReadService(
+                ownership: $this->app->make(OwnershipManager::class),
+            ),
+        );
         $this->app->singleton(DraftStateService::class, static fn (): DraftStateService => new DraftStateService());
         $this->app->singleton(StagedUploadService::class, static fn (): StagedUploadService => new StagedUploadService());
         $this->app->singleton(
@@ -136,6 +142,7 @@ class FormForgeServiceProvider extends ServiceProvider
                 InstallCommand::class,
                 InstallMergeCommand::class,
                 MakeAutomationCommand::class,
+                MakeAutomationResolverCommand::class,
                 MakeHttpControllerCommand::class,
                 MakePolicyCommand::class,
                 ListCommand::class,

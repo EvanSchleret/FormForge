@@ -15,7 +15,7 @@ class RunSubmissionAutomationJob implements ShouldQueue
 
     public function __construct(
         public readonly int $submissionId,
-        public readonly string $automationKey,
+        public readonly string $registrationKey,
         ?string $connection = null,
         ?string $queue = null,
     ) {
@@ -25,6 +25,6 @@ class RunSubmissionAutomationJob implements ShouldQueue
 
     public function handle(SubmissionAutomationDispatcher $dispatcher): void
     {
-        $dispatcher->run($this->submissionId, $this->automationKey);
+        $dispatcher->run($this->submissionId, $this->registrationKey);
     }
 }

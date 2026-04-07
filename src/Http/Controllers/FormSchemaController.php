@@ -12,8 +12,9 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class FormSchemaController
 {
-    public function latest(Request $request, FormManager $forms, string $key): JsonResponse
+    public function latest(Request $request, FormManager $forms): JsonResponse
     {
+        $key = $this->routeRequired($request, 'key');
         $form = $this->requestForm($request);
 
         if (! $form instanceof FormInstance || $form->key() !== $key) {
@@ -27,8 +28,10 @@ class FormSchemaController
         ]);
     }
 
-    public function versions(FormManager $forms, string $key): JsonResponse
+    public function versions(Request $request, FormManager $forms): JsonResponse
     {
+        $key = $this->routeRequired($request, 'key');
+
         return response()->json([
             'data' => [
                 'key' => $key,
@@ -37,8 +40,10 @@ class FormSchemaController
         ]);
     }
 
-    public function show(Request $request, FormManager $forms, string $key, string $version): JsonResponse
+    public function show(Request $request, FormManager $forms): JsonResponse
     {
+        $key = $this->routeRequired($request, 'key');
+        $version = $this->routeRequired($request, 'version');
         $form = $this->requestForm($request);
 
         if (! $form instanceof FormInstance || $form->key() !== $key || $form->version() !== $version) {
@@ -66,5 +71,32 @@ class FormSchemaController
         }
 
         throw new NotFoundHttpException('Form schema not found.');
+    }
+
+    private function routeRequired(Request $request, string $name): string
+    {
+        $attribute = $request->attributes->get('formforge.route.' . $name);
+
+        if (is_scalar($attribute)) {
+            $resolved = trim((string) $attribute);
+
+            if ($resolved !== '') {
+                return $resolved;
+            }
+        }
+
+        $value = $request->route($name);
+
+        if (! is_scalar($value)) {
+            throw new NotFoundHttpException("Route parameter [{$name}] is required.");
+        }
+
+        $resolved = trim((string) $value);
+
+        if ($resolved === '') {
+            throw new NotFoundHttpException("Route parameter [{$name}] is required.");
+        }
+
+        return $resolved;
     }
 }

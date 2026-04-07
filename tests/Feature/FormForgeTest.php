@@ -13,6 +13,7 @@ use EvanSchleret\FormForge\Models\StagedUpload;
 use EvanSchleret\FormForge\Automations\SubmissionAutomationDispatcher;
 use EvanSchleret\FormForge\Ownership\OwnershipReference;
 use EvanSchleret\FormForge\Registry\FormRegistry;
+use EvanSchleret\FormForge\Tests\Fixtures\ActiveFormKeyAutomationResolver;
 use EvanSchleret\FormForge\Tests\Fixtures\CreateMembershipFromSubmissionAutomation;
 use EvanSchleret\FormForge\Tests\Fixtures\Models\CustomFormSubmission;
 use EvanSchleret\FormForge\Tests\Fixtures\User;
@@ -324,6 +325,61 @@ it('runs code-first submission automations after form submit', function (): void
     expect($run->attempts)->toBe(1);
 });
 
+it('runs resolver-based submission automations using runtime form resolution', function (): void {
+    Schema::create('memberships', function (\Illuminate\Database\Schema\Blueprint $table): void {
+        $table->id();
+        $table->unsignedBigInteger('form_submission_id');
+        $table->string('email');
+        $table->string('plan');
+    });
+
+    $firstKey = 'automation_first_' . Str::lower(Str::random(8));
+    $secondKey = 'automation_second_' . Str::lower(Str::random(8));
+
+    Form::automationForResolver(ActiveFormKeyAutomationResolver::class)
+        ->sync()
+        ->handler(CreateMembershipFromSubmissionAutomation::class, 'create_membership_active');
+
+    Form::define($firstKey)
+        ->version('1')
+        ->email('email')->required()
+        ->text('plan')->required();
+
+    Form::define($secondKey)
+        ->version('1')
+        ->email('email')->required()
+        ->text('plan')->required();
+
+    config()->set('formforge.tests.active_form_key', $firstKey);
+
+    Form::get($firstKey, '1')->submit([
+        'email' => 'first@example.com',
+        'plan' => 'starter',
+    ]);
+
+    Form::get($secondKey, '1')->submit([
+        'email' => 'ignored@example.com',
+        'plan' => 'pro',
+    ]);
+
+    expect(DB::table('memberships')->count())->toBe(1);
+    expect(DB::table('memberships')->value('email'))->toBe('first@example.com');
+
+    config()->set('formforge.tests.active_form_key', $secondKey);
+
+    Form::get($secondKey, '1')->submit([
+        'email' => 'second@example.com',
+        'plan' => 'pro',
+    ]);
+
+    expect(DB::table('memberships')->count())->toBe(2);
+    expect(DB::table('memberships')->orderByDesc('id')->value('email'))->toBe('second@example.com');
+
+    expect(
+        SubmissionAutomationRun::query()->where('automation_key', 'create_membership_active')->count()
+    )->toBe(2);
+});
+
 it('supports form category and publication metadata in schema', function (): void {
     $key = 'meta_' . Str::lower(Str::random(8));
 
@@ -395,6 +451,26 @@ it('scaffolds a submission automation class with make command', function (): voi
     expect($content)->toContain('namespace App\\FormForge\\Automations\\Membership;');
     expect($content)->toContain('class CreateMembership implements SubmissionAutomation');
     expect($content)->toContain('public function handle(FormSubmission $submission): void');
+});
+
+it('scaffolds a submission automation resolver class with make command', function (): void {
+    $directory = storage_path('app/formforge-tests/automation-resolvers/' . Str::lower(Str::random(8)));
+    File::ensureDirectoryExists($directory);
+
+    $this->artisan("formforge:make:automation-resolver Membership/ResolveActiveMembershipForm --path={$directory} --namespace=App\\\\FormForge\\\\AutomationResolvers")
+        ->expectsOutputToContain('Automation resolver created:')
+        ->expectsOutputToContain('Form::automationForResolver(')
+        ->assertExitCode(0);
+
+    $generated = $directory . '/Membership/ResolveActiveMembershipForm.php';
+
+    expect(File::exists($generated))->toBeTrue();
+
+    $content = (string) File::get($generated);
+
+    expect($content)->toContain('namespace App\\FormForge\\AutomationResolvers\\Membership;');
+    expect($content)->toContain('class ResolveActiveMembershipForm implements SubmissionAutomationResolver');
+    expect($content)->toContain('public function matches(FormSubmission $submission): bool');
 });
 
 it('scaffolds HTTP override controllers with make command', function (): void {

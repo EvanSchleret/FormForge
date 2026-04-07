@@ -62,8 +62,9 @@ class FormManagementController
         ]);
     }
 
-    public function category(Request $request, FormCategoryService $categories, string $categoryKey): JsonResponse
+    public function category(Request $request, FormCategoryService $categories): JsonResponse
     {
+        $categoryKey = $this->routeRequired($request, 'categoryKey');
         $owner = $this->resolvedOwner($request, 'category');
         $category = $categories->findByKey($categoryKey, $owner);
 
@@ -95,8 +96,9 @@ class FormManagementController
         ], 201);
     }
 
-    public function updateCategory(Request $request, FormCategoryService $categories, string $categoryKey): JsonResponse
+    public function updateCategory(Request $request, FormCategoryService $categories): JsonResponse
     {
+        $categoryKey = $this->routeRequired($request, 'categoryKey');
         $owner = $this->resolvedOwner($request, 'category_update');
 
         try {
@@ -116,8 +118,9 @@ class FormManagementController
         ]);
     }
 
-    public function deleteCategory(Request $request, FormCategoryService $categories, string $categoryKey): JsonResponse
+    public function deleteCategory(Request $request, FormCategoryService $categories): JsonResponse
     {
+        $categoryKey = $this->routeRequired($request, 'categoryKey');
         $owner = $this->resolvedOwner($request, 'category_delete');
 
         try {
@@ -143,12 +146,12 @@ class FormManagementController
         FormDefinitionRepository $repository,
         SubmissionReadService $submissions,
         SubmissionHttpResource $resources,
-        string $key,
     ): JsonResponse {
+        $key = $this->routeRequired($request, 'key');
         $owner = $this->resolvedOwner($request, 'responses');
 
         $knownForm = $repository->keyExists($key, true, $owner);
-        $knownBySubmissionOnly = $owner === null && $submissions->existsForForm($key);
+        $knownBySubmissionOnly = $submissions->existsForForm($key, $owner);
 
         if (! $knownForm && ! $knownBySubmissionOnly) {
             throw new NotFoundHttpException("Form [{$key}] not found.");
@@ -160,7 +163,7 @@ class FormManagementController
             'is_test' => $request->query('is_test'),
         ];
 
-        $paginator = $submissions->paginateForForm($key, $perPage, $filters);
+        $paginator = $submissions->paginateForForm($key, $perPage, $filters, $owner);
         $paginator->appends($request->query());
 
         return response()->json([
@@ -190,20 +193,20 @@ class FormManagementController
         FormDefinitionRepository $repository,
         SubmissionReadService $submissions,
         SubmissionHttpResource $resources,
-        string $key,
-        string $submissionUuid,
     ): JsonResponse {
+        $key = $this->routeRequired($request, 'key');
+        $submissionUuid = $this->routeRequired($request, 'submissionUuid');
         $owner = $this->resolvedOwner($request, 'response');
 
         $knownForm = $repository->keyExists($key, true, $owner);
-        $knownBySubmissionOnly = $owner === null && $submissions->existsForForm($key);
+        $knownBySubmissionOnly = $submissions->existsForForm($key, $owner);
 
         if (! $knownForm && ! $knownBySubmissionOnly) {
             throw new NotFoundHttpException("Form [{$key}] not found.");
         }
 
         $submissionUuid = trim($submissionUuid);
-        $submission = $submissions->findForForm($key, $submissionUuid);
+        $submission = $submissions->findForForm($key, $submissionUuid, $owner);
 
         if ($submission === null) {
             throw new NotFoundHttpException("Submission [{$submissionUuid}] not found for form [{$key}].");
@@ -218,20 +221,20 @@ class FormManagementController
         Request $request,
         FormDefinitionRepository $repository,
         SubmissionReadService $submissions,
-        string $key,
-        string $submissionUuid,
     ): JsonResponse {
+        $key = $this->routeRequired($request, 'key');
+        $submissionUuid = $this->routeRequired($request, 'submissionUuid');
         $owner = $this->resolvedOwner($request, 'response_delete');
 
         $knownForm = $repository->keyExists($key, true, $owner);
-        $knownBySubmissionOnly = $owner === null && $submissions->existsForForm($key);
+        $knownBySubmissionOnly = $submissions->existsForForm($key, $owner);
 
         if (! $knownForm && ! $knownBySubmissionOnly) {
             throw new NotFoundHttpException("Form [{$key}] not found.");
         }
 
         $submissionUuid = trim($submissionUuid);
-        $deleted = $submissions->deleteForForm($key, $submissionUuid);
+        $deleted = $submissions->deleteForForm($key, $submissionUuid, $owner);
 
         if (! $deleted) {
             throw new NotFoundHttpException("Submission [{$submissionUuid}] not found for form [{$key}].");
@@ -326,8 +329,8 @@ class FormManagementController
         Request $request,
         FormMutationService $mutations,
         IdempotencyService $idempotency,
-        string $key,
     ): JsonResponse {
+        $key = $this->routeRequired($request, 'key');
         $owner = $this->resolvedOwner($request, 'update');
         $payload = $request->all();
         $hash = $idempotency->payloadHash($payload);
@@ -374,8 +377,8 @@ class FormManagementController
         Request $request,
         FormMutationService $mutations,
         IdempotencyService $idempotency,
-        string $key,
     ): JsonResponse {
+        $key = $this->routeRequired($request, 'key');
         return $this->togglePublication(
             request: $request,
             mutations: $mutations,
@@ -389,8 +392,8 @@ class FormManagementController
         Request $request,
         FormMutationService $mutations,
         IdempotencyService $idempotency,
-        string $key,
     ): JsonResponse {
+        $key = $this->routeRequired($request, 'key');
         return $this->togglePublication(
             request: $request,
             mutations: $mutations,
@@ -400,8 +403,9 @@ class FormManagementController
         );
     }
 
-    public function delete(Request $request, FormMutationService $mutations, string $key): JsonResponse
+    public function delete(Request $request, FormMutationService $mutations): JsonResponse
     {
+        $key = $this->routeRequired($request, 'key');
         $owner = $this->resolvedOwner($request, 'delete');
 
         try {
@@ -418,8 +422,9 @@ class FormManagementController
         ]);
     }
 
-    public function revisions(Request $request, FormMutationService $mutations, string $key): JsonResponse
+    public function revisions(Request $request, FormMutationService $mutations): JsonResponse
     {
+        $key = $this->routeRequired($request, 'key');
         $owner = $this->resolvedOwner($request, 'revisions');
         $includeDeleted = $this->toBool($request->query('include_deleted', false));
 
@@ -440,10 +445,10 @@ class FormManagementController
     public function diff(
         Request $request,
         FormMutationService $mutations,
-        string $key,
-        int $fromVersion,
-        int $toVersion,
     ): JsonResponse {
+        $key = $this->routeRequired($request, 'key');
+        $fromVersion = $this->routeIntRequired($request, 'fromVersion');
+        $toVersion = $this->routeIntRequired($request, 'toVersion');
         $owner = $this->resolvedOwner($request, 'diff');
         $includeDeleted = $this->toBool($request->query('include_deleted', false));
 
@@ -573,6 +578,44 @@ class FormManagementController
 
     protected function authorizeAction(Request $request, string $action, ?OwnershipReference $owner): void
     {
+    }
+
+    private function routeRequired(Request $request, string $name): string
+    {
+        $attribute = $request->attributes->get('formforge.route.' . $name);
+
+        if (is_scalar($attribute)) {
+            $resolved = trim((string) $attribute);
+
+            if ($resolved !== '') {
+                return $resolved;
+            }
+        }
+
+        $value = $request->route($name);
+
+        if (! is_scalar($value)) {
+            throw new NotFoundHttpException("Route parameter [{$name}] is required.");
+        }
+
+        $resolved = trim((string) $value);
+
+        if ($resolved === '') {
+            throw new NotFoundHttpException("Route parameter [{$name}] is required.");
+        }
+
+        return $resolved;
+    }
+
+    private function routeIntRequired(Request $request, string $name): int
+    {
+        $value = $this->routeRequired($request, $name);
+
+        if (! is_numeric($value)) {
+            throw new NotFoundHttpException("Route parameter [{$name}] must be numeric.");
+        }
+
+        return (int) $value;
     }
 
     private function serializeFormDefinition(Request $request, FormMutationService $mutations, FormDefinition $definition): array

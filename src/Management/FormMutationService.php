@@ -364,7 +364,13 @@ class FormMutationService
         $category = $this->normalizedOptionalString($filters['category'] ?? null);
 
         if ($category !== null) {
-            $query->where('category', $category);
+            $query->where(function (Builder $builder) use ($category): void {
+                $builder
+                    ->where('category', $category)
+                    ->orWhereHas('categoryModel', static function (Builder $categoryQuery) use ($category): void {
+                        $categoryQuery->where('slug', $category);
+                    });
+            });
         }
 
         $published = $this->normalizeOptionalBool($filters['is_published'] ?? null);

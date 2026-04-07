@@ -27,13 +27,13 @@ class SubmissionAutomationDispatcher
             return;
         }
 
-        $definitions = $this->registry->resolveForForm((string) $submission->form_key);
+        $definitions = $this->registry->resolveForSubmission($submission);
 
         foreach ($definitions as $definition) {
             if ($definition->queued) {
                 $this->bus->dispatch(new RunSubmissionAutomationJob(
                     submissionId: (int) $submission->getKey(),
-                    automationKey: $definition->automationKey,
+                    registrationKey: $definition->registrationKey(),
                     connection: $definition->connection,
                     queue: $definition->queue,
                 ));
@@ -45,7 +45,7 @@ class SubmissionAutomationDispatcher
         }
     }
 
-    public function run(int $submissionId, string $automationKey): void
+    public function run(int $submissionId, string $registrationKey): void
     {
         $submission = ModelClassResolver::formSubmission()::query()->find($submissionId);
 
@@ -53,9 +53,13 @@ class SubmissionAutomationDispatcher
             return;
         }
 
-        $definition = $this->registry->resolve((string) $submission->form_key, $automationKey);
+        $definition = $this->registry->resolveRegistration($registrationKey);
 
         if (! $definition instanceof AutomationDefinition) {
+            return;
+        }
+
+        if (! $this->registry->matchesSubmission($definition, $submission)) {
             return;
         }
 

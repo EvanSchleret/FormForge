@@ -17,8 +17,9 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class FormUploadController
 {
-    public function stageLatest(Request $request, FormManager $forms, UploadManager $uploads, string $key): JsonResponse
+    public function stageLatest(Request $request, FormManager $forms, UploadManager $uploads): JsonResponse
     {
+        $key = $this->routeRequired($request, 'key');
         $version = $request->input('version');
 
         if (! is_string($version) || trim($version) === '') {
@@ -32,9 +33,10 @@ class FormUploadController
         Request $request,
         FormManager $forms,
         UploadManager $uploads,
-        string $key,
-        string $version,
     ): JsonResponse {
+        $key = $this->routeRequired($request, 'key');
+        $version = $this->routeRequired($request, 'version');
+
         return $this->stage($request, $forms, $uploads, $key, $version);
     }
 
@@ -142,5 +144,32 @@ class FormUploadController
         throw ValidationException::withMessages([
             'form' => ['This form is not published yet.'],
         ]);
+    }
+
+    private function routeRequired(Request $request, string $name): string
+    {
+        $attribute = $request->attributes->get('formforge.route.' . $name);
+
+        if (is_scalar($attribute)) {
+            $resolved = trim((string) $attribute);
+
+            if ($resolved !== '') {
+                return $resolved;
+            }
+        }
+
+        $value = $request->route($name);
+
+        if (! is_scalar($value)) {
+            throw new NotFoundHttpException("Route parameter [{$name}] is required.");
+        }
+
+        $resolved = trim((string) $value);
+
+        if ($resolved === '') {
+            throw new NotFoundHttpException("Route parameter [{$name}] is required.");
+        }
+
+        return $resolved;
     }
 }
