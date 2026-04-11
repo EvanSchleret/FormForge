@@ -41,7 +41,11 @@ return new class extends Migration
 
         Schema::connection($connection)->create($overridesTable, function (Blueprint $table) use ($submissionsTable): void {
             $table->id();
-            $table->foreignId('form_submission_id')->constrained($submissionsTable)->cascadeOnDelete();
+            $table->foreignId('form_submission_id');
+            $table->foreign('form_submission_id', 'formforge_sub_priv_overrides_submission_fk')
+                ->references('id')
+                ->on($submissionsTable)
+                ->cascadeOnDelete();
             $table->string('action')->default('anonymize');
             $table->timestamp('execute_at')->nullable();
             $table->timestamp('processed_at')->nullable();
