@@ -40,7 +40,7 @@ class FormMutationService
         $drafts = $input['drafts'] ?? [];
         $categoryModel = array_key_exists('category', $input)
             ? $this->resolveOptionalCategoryModel($input['category'], $owner)
-            : $this->categories->ensureForForms(null, $owner);
+            : null;
         $api = $this->normalizedArray($input['api'] ?? []);
         $meta = $this->normalizedArray($input['meta'] ?? []);
         $key = $this->buildGeneratedKey();

@@ -121,7 +121,7 @@ class FormCategoryService
         $normalized = $this->normalizedOptionalString($key);
 
         if ($normalized === null) {
-            return $this->ensureDefaultCategory($owner);
+            return null;
         }
 
         $existing = $this->findByIdentifier($normalized, $owner);
@@ -282,66 +282,6 @@ class FormCategoryService
             'created_at' => $category->created_at?->toIso8601String(),
             'updated_at' => $category->updated_at?->toIso8601String(),
         ];
-    }
-
-    private function ensureDefaultCategory(?OwnershipReference $owner = null): FormCategory
-    {
-        $default = trim((string) config('formforge.forms.default_category', 'general'));
-
-        if ($default === '') {
-            $default = 'general';
-        }
-
-        $defaultName = $default;
-        $defaultSlug = $this->normalizedSlug($default) ?? 'general';
-
-        $bySlugQuery = $this->categoryModelClass()::query()
-            ->where('slug', $defaultSlug);
-        $this->applyOwnerOrSystemScope($bySlugQuery, $owner);
-        $bySlug = $bySlugQuery->first();
-
-        if ($bySlug instanceof FormCategory) {
-            if (! (bool) ($bySlug->is_system ?? false)) {
-                $bySlug->is_system = true;
-                $bySlug->save();
-            }
-
-            return $bySlug;
-        }
-
-        $query = $this->categoryModelClass()::query()
-            ->whereRaw('LOWER(name) = ?', [strtolower($defaultName)]);
-        $this->applyOwnerOrSystemScope($query, $owner);
-        $existing = $query->first();
-
-        if ($existing instanceof FormCategory) {
-            if ($this->normalizedOptionalString($existing->slug) === null) {
-                $existing->slug = $this->uniqueSlug($defaultSlug, (int) $existing->getKey(), $owner);
-            }
-
-            if (! (bool) ($existing->is_system ?? false)) {
-                $existing->is_system = true;
-            }
-
-            $existing->save();
-
-            return $existing;
-        }
-
-        $category = $this->categoryModelClass()::query()->make([
-            'key' => (string) Str::uuid(),
-            'slug' => $this->uniqueSlug($defaultSlug, owner: $owner),
-            'name' => $defaultName,
-            'description' => null,
-            'meta' => ['default' => true],
-            'is_active' => true,
-            'is_system' => true,
-        ]);
-
-        $this->ownership->assignToModel($category, $owner);
-        $category->save();
-
-        return $category->refresh();
     }
 
     private function normalizedArray(mixed $value): array

@@ -7,6 +7,7 @@ namespace EvanSchleret\FormForge;
 use EvanSchleret\FormForge\Automations\AutomationRegistry;
 use EvanSchleret\FormForge\Automations\SubmissionAutomationDispatcher;
 use EvanSchleret\FormForge\Commands\DescribeCommand;
+use EvanSchleret\FormForge\Commands\CreateCategoryCommand;
 use EvanSchleret\FormForge\Commands\DraftsCleanupCommand;
 use EvanSchleret\FormForge\Commands\HttpOptionsCommand;
 use EvanSchleret\FormForge\Commands\HttpResolveCommand;
@@ -167,6 +168,7 @@ class FormForgeServiceProvider extends ServiceProvider
                 MakePolicyCommand::class,
                 ListCommand::class,
                 DescribeCommand::class,
+                CreateCategoryCommand::class,
                 SyncCommand::class,
                 HttpOptionsCommand::class,
                 HttpResolveCommand::class,

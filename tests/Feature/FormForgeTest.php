@@ -6,6 +6,7 @@ use EvanSchleret\FormForge\Exceptions\ImmutableVersionException;
 use EvanSchleret\FormForge\Exceptions\UnknownFieldsException;
 use EvanSchleret\FormForge\Facades\Form;
 use EvanSchleret\FormForge\FormManager;
+use EvanSchleret\FormForge\Models\FormCategory;
 use EvanSchleret\FormForge\Models\FormDraft;
 use EvanSchleret\FormForge\Models\FormDefinition;
 use EvanSchleret\FormForge\Models\FormSubmission;
@@ -88,6 +89,7 @@ it('rejects nullish values when field is required', function (): void {
 
 it('syncs runtime definitions idempotently and enforces immutability', function (): void {
     $key = 'sync_' . Str::lower(Str::random(8));
+    $initialCategoryCount = FormCategory::query()->count();
 
     $manager = app(FormManager::class);
 
@@ -98,9 +100,14 @@ it('syncs runtime definitions idempotently and enforces immutability', function 
 
     $first = $manager->sync();
     $second = $manager->sync();
+    $definition = FormDefinition::query()->where('key', $key)->first();
 
     expect($first['created'])->toBe(1);
     expect($second['unchanged'])->toBe(1);
+    expect($definition)->toBeInstanceOf(FormDefinition::class);
+    expect($definition?->category)->toBe('');
+    expect($definition?->form_category_id)->toBeNull();
+    expect(FormCategory::query()->count())->toBe($initialCategoryCount);
 
     app()->instance(FormRegistry::class, new FormRegistry());
     app()->forgetInstance(FormManager::class);
@@ -432,6 +439,39 @@ it('supports list command filtering by category and publication', function (): v
     $this->artisan('formforge:list --category=survey --published=yes')
         ->expectsOutputToContain($surveyKey)
         ->assertExitCode(0);
+});
+
+it('creates a category through artisan command', function (): void {
+    $this->artisan('formforge:category:create "Customer Survey" --slug=customer-survey --description="Survey forms" --is-active=0 --is-system=1')
+        ->expectsOutputToContain('Category created.')
+        ->assertExitCode(0);
+
+    $category = FormCategory::query()->where('slug', 'customer-survey')->first();
+
+    expect($category)->toBeInstanceOf(FormCategory::class);
+    expect($category?->name)->toBe('Customer Survey');
+    expect($category?->description)->toBe('Survey forms');
+    expect((bool) $category?->is_active)->toBeFalse();
+    expect((bool) $category?->is_system)->toBeTrue();
+});
+
+it('prompts for category creation when no argument is provided', function (): void {
+    $this->artisan('formforge:category:create')
+        ->expectsQuestion('Category name', 'Interactive Category')
+        ->expectsQuestion('Category slug (optional)', 'interactive-category')
+        ->expectsQuestion('Category description (optional)', 'Created from prompt')
+        ->expectsConfirmation('Is category active?', 'yes')
+        ->expectsConfirmation('Is this a system category?', 'no')
+        ->expectsOutputToContain('Category created.')
+        ->assertExitCode(0);
+
+    $category = FormCategory::query()->where('slug', 'interactive-category')->first();
+
+    expect($category)->toBeInstanceOf(FormCategory::class);
+    expect($category?->name)->toBe('Interactive Category');
+    expect($category?->description)->toBe('Created from prompt');
+    expect((bool) $category?->is_active)->toBeTrue();
+    expect((bool) $category?->is_system)->toBeFalse();
 });
 
 it('scaffolds a submission automation class with make command', function (): void {

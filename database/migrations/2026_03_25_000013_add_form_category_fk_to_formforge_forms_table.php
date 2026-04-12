@@ -32,17 +32,13 @@ return new class extends Migration
 
         $this->bootstrapCategoryCache($connection, $categoriesTable, $categoriesById, $categoriesByKey, $categoriesByName);
 
-        $defaultCategory = $this->resolveCategoryByLegacyValue(
-            connection: $connection,
-            table: $categoriesTable,
-            legacyValue: config('formforge.forms.default_category', 'general'),
-            categoriesById: $categoriesById,
-            categoriesByKey: $categoriesByKey,
-            categoriesByName: $categoriesByName,
-            fallback: null,
-        );
+        $defaultCategory = null;
 
         if (! Schema::connection($connection)->hasColumn($formsTable, 'category')) {
+            if ($defaultCategory === null) {
+                return;
+            }
+
             DB::connection($connection)->table($formsTable)
                 ->whereNull('form_category_id')
                 ->update(['form_category_id' => $defaultCategory['id']]);
@@ -66,6 +62,10 @@ return new class extends Migration
                         categoriesByName: $categoriesByName,
                         fallback: $defaultCategory,
                     );
+
+                    if ($resolved === null) {
+                        continue;
+                    }
 
                     $currentCategory = is_string($row->category ?? null) ? trim((string) $row->category) : null;
                     $currentCategoryId = is_numeric($row->form_category_id) ? (int) $row->form_category_id : null;
@@ -169,8 +169,8 @@ return new class extends Migration
         array &$categoriesById,
         array &$categoriesByKey,
         array &$categoriesByName,
-        array $fallback,
-    ): array {
+        ?array $fallback,
+    ): ?array {
         if (is_numeric($formCategoryId)) {
             $resolvedById = $this->resolveCategoryById($connection, $table, (int) $formCategoryId, $categoriesById, $categoriesByKey, $categoriesByName);
 
@@ -262,7 +262,7 @@ return new class extends Migration
         array &$categoriesByKey,
         array &$categoriesByName,
         ?array $fallback,
-    ): array {
+    ): ?array {
         $raw = is_string($legacyValue) ? trim($legacyValue) : '';
 
         if ($raw !== '' && Str::isUuid($raw)) {
@@ -280,7 +280,7 @@ return new class extends Migration
                 return $fallback;
             }
 
-            $name = 'General';
+            return null;
         }
 
         $nameIndex = Str::lower($name);
