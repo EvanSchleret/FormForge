@@ -20,6 +20,9 @@ class CreateRecordFromSubmissionAutomation implements SubmissionAutomation
             'plan' => (string) ($payload['plan'] ?? ''),
         ]);
 
-        $submission->meta('record_id', (int) $recordId);
+        $meta = is_array($submission->meta) ? $submission->meta : [];
+        $meta['record_id'] = (int) $recordId;
+        $submission->meta = $meta;
+        $submission->save();
     }
 }
