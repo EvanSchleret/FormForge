@@ -141,6 +141,8 @@ class FormCategoryService
             throw new FormForgeException('Category name cannot be empty.');
         }
 
+        $this->assertNameAllowed($name);
+
         $isSystem = false;
 
         if (array_key_exists('is_system', $input)) {
@@ -194,6 +196,8 @@ class FormCategoryService
             if ($name === '') {
                 throw new FormForgeException('Category name cannot be empty.');
             }
+
+            $this->assertNameAllowed($name);
 
             $category->name = $name;
         }
@@ -313,6 +317,31 @@ class FormCategoryService
         $value = trim($value);
 
         return $value === '' ? null : $value;
+    }
+
+    private function assertNameAllowed(string $name): void
+    {
+        $forbidden = config('formforge.categories.forbidden_names', []);
+
+        if (! is_array($forbidden)) {
+            return;
+        }
+
+        $normalizedName = strtolower(trim($name));
+
+        if ($normalizedName === '') {
+            return;
+        }
+
+        foreach ($forbidden as $candidate) {
+            if (! is_string($candidate)) {
+                continue;
+            }
+
+            if (strtolower(trim($candidate)) === $normalizedName) {
+                throw new FormForgeException("Category name [{$name}] is forbidden.");
+            }
+        }
     }
 
     private function normalizeOptionalBool(mixed $value): ?bool

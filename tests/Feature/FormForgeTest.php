@@ -16,7 +16,7 @@ use EvanSchleret\FormForge\Automations\SubmissionAutomationDispatcher;
 use EvanSchleret\FormForge\Ownership\OwnershipReference;
 use EvanSchleret\FormForge\Registry\FormRegistry;
 use EvanSchleret\FormForge\Tests\Fixtures\ActiveFormKeyAutomationResolver;
-use EvanSchleret\FormForge\Tests\Fixtures\CreateMembershipFromSubmissionAutomation;
+use EvanSchleret\FormForge\Tests\Fixtures\CreateRecordFromSubmissionAutomation;
 use EvanSchleret\FormForge\Tests\Fixtures\Models\CustomFormSubmission;
 use EvanSchleret\FormForge\Tests\Fixtures\User;
 use Illuminate\Http\UploadedFile;
@@ -292,7 +292,7 @@ it('supports overriding package models via config', function (): void {
 });
 
 it('runs code-first submission automations after form submit', function (): void {
-    Schema::create('memberships', function (\Illuminate\Database\Schema\Blueprint $table): void {
+    Schema::create('records', function (\Illuminate\Database\Schema\Blueprint $table): void {
         $table->id();
         $table->unsignedBigInteger('form_submission_id');
         $table->string('email');
@@ -303,7 +303,7 @@ it('runs code-first submission automations after form submit', function (): void
 
     Form::automation($key)
         ->sync()
-        ->handler(CreateMembershipFromSubmissionAutomation::class, 'create_membership');
+        ->handler(CreateRecordFromSubmissionAutomation::class, 'create_record');
 
     Form::define($key)
         ->version('1')
@@ -315,26 +315,27 @@ it('runs code-first submission automations after form submit', function (): void
         'plan' => 'pro',
     ]);
 
-    expect(DB::table('memberships')->count())->toBe(1);
-    expect(DB::table('memberships')->value('email'))->toBe('member@example.com');
-    expect(DB::table('memberships')->value('plan'))->toBe('pro');
+    expect(DB::table('records')->count())->toBe(1);
+    expect(DB::table('records')->value('email'))->toBe('member@example.com');
+    expect(DB::table('records')->value('plan'))->toBe('pro');
+    expect((int) ($submission->refresh()->meta['record_id'] ?? 0))->toBeGreaterThan(0);
 
     $run = SubmissionAutomationRun::query()->first();
 
     expect($run)->not->toBeNull();
-    expect($run?->automation_key)->toBe('create_membership');
+    expect($run?->automation_key)->toBe('create_record');
     expect($run?->status)->toBe('completed');
 
     app(SubmissionAutomationDispatcher::class)->dispatch($submission);
 
-    expect(DB::table('memberships')->count())->toBe(1);
+    expect(DB::table('records')->count())->toBe(1);
 
     $run->refresh();
     expect($run->attempts)->toBe(1);
 });
 
 it('runs resolver-based submission automations using runtime form resolution', function (): void {
-    Schema::create('memberships', function (\Illuminate\Database\Schema\Blueprint $table): void {
+    Schema::create('records', function (\Illuminate\Database\Schema\Blueprint $table): void {
         $table->id();
         $table->unsignedBigInteger('form_submission_id');
         $table->string('email');
@@ -346,7 +347,7 @@ it('runs resolver-based submission automations using runtime form resolution', f
 
     Form::automationForResolver(ActiveFormKeyAutomationResolver::class)
         ->sync()
-        ->handler(CreateMembershipFromSubmissionAutomation::class, 'create_membership_active');
+        ->handler(CreateRecordFromSubmissionAutomation::class, 'create_record_active');
 
     Form::define($firstKey)
         ->version('1')
@@ -370,8 +371,8 @@ it('runs resolver-based submission automations using runtime form resolution', f
         'plan' => 'pro',
     ]);
 
-    expect(DB::table('memberships')->count())->toBe(1);
-    expect(DB::table('memberships')->value('email'))->toBe('first@example.com');
+    expect(DB::table('records')->count())->toBe(1);
+    expect(DB::table('records')->value('email'))->toBe('first@example.com');
 
     config()->set('formforge.tests.active_form_key', $secondKey);
 
@@ -380,11 +381,11 @@ it('runs resolver-based submission automations using runtime form resolution', f
         'plan' => 'pro',
     ]);
 
-    expect(DB::table('memberships')->count())->toBe(2);
-    expect(DB::table('memberships')->orderByDesc('id')->value('email'))->toBe('second@example.com');
+    expect(DB::table('records')->count())->toBe(2);
+    expect(DB::table('records')->orderByDesc('id')->value('email'))->toBe('second@example.com');
 
     expect(
-        SubmissionAutomationRun::query()->where('automation_key', 'create_membership_active')->count()
+        SubmissionAutomationRun::query()->where('automation_key', 'create_record_active')->count()
     )->toBe(2);
 });
 
@@ -478,19 +479,19 @@ it('scaffolds a submission automation class with make command', function (): voi
     $directory = storage_path('app/formforge-tests/automations/' . Str::lower(Str::random(8)));
     File::ensureDirectoryExists($directory);
 
-    $this->artisan("formforge:make:automation Membership/CreateMembership --path={$directory} --namespace=App\\\\FormForge\\\\Automations --form=membership-application --sync")
+    $this->artisan("formforge:make:automation Examples/CreateRecord --path={$directory} --namespace=App\\\\FormForge\\\\Automations --form=generic-application --sync")
         ->expectsOutputToContain('Automation created:')
-        ->expectsOutputToContain("Form::automation('membership-application')->sync()->handler(")
+        ->expectsOutputToContain("Form::automation('generic-application')->sync()->handler(")
         ->assertExitCode(0);
 
-    $generated = $directory . '/Membership/CreateMembership.php';
+    $generated = $directory . '/Examples/CreateRecord.php';
 
     expect(File::exists($generated))->toBeTrue();
 
     $content = (string) File::get($generated);
 
-    expect($content)->toContain('namespace App\\FormForge\\Automations\\Membership;');
-    expect($content)->toContain('class CreateMembership implements SubmissionAutomation');
+    expect($content)->toContain('namespace App\\FormForge\\Automations\\Examples;');
+    expect($content)->toContain('class CreateRecord implements SubmissionAutomation');
     expect($content)->toContain('public function handle(FormSubmission $submission): void');
 });
 
@@ -498,19 +499,19 @@ it('scaffolds a submission automation resolver class with make command', functio
     $directory = storage_path('app/formforge-tests/automation-resolvers/' . Str::lower(Str::random(8)));
     File::ensureDirectoryExists($directory);
 
-    $this->artisan("formforge:make:automation-resolver Membership/ResolveActiveMembershipForm --path={$directory} --namespace=App\\\\FormForge\\\\AutomationResolvers")
+    $this->artisan("formforge:make:automation-resolver Examples/ResolveActiveForm --path={$directory} --namespace=App\\\\FormForge\\\\AutomationResolvers")
         ->expectsOutputToContain('Automation resolver created:')
         ->expectsOutputToContain('Form::automationForResolver(')
         ->assertExitCode(0);
 
-    $generated = $directory . '/Membership/ResolveActiveMembershipForm.php';
+    $generated = $directory . '/Examples/ResolveActiveForm.php';
 
     expect(File::exists($generated))->toBeTrue();
 
     $content = (string) File::get($generated);
 
-    expect($content)->toContain('namespace App\\FormForge\\AutomationResolvers\\Membership;');
-    expect($content)->toContain('class ResolveActiveMembershipForm implements SubmissionAutomationResolver');
+    expect($content)->toContain('namespace App\\FormForge\\AutomationResolvers\\Examples;');
+    expect($content)->toContain('class ResolveActiveForm implements SubmissionAutomationResolver');
     expect($content)->toContain('public function matches(FormSubmission $submission): bool');
 });
 

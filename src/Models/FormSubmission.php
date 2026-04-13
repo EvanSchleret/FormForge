@@ -98,4 +98,31 @@ class FormSubmission extends Model
     {
         return $query->where('is_test', $isTest);
     }
+
+    public function meta(string|array $key, mixed $value = null): self
+    {
+        $current = $this->getAttribute('meta');
+        $meta = is_array($current) ? $current : [];
+
+        if (is_array($key)) {
+            foreach ($key as $entryKey => $entryValue) {
+                if (! is_string($entryKey) || trim($entryKey) === '') {
+                    continue;
+                }
+
+                $meta[$entryKey] = $entryValue;
+            }
+        } else {
+            $name = trim($key);
+
+            if ($name !== '') {
+                $meta[$name] = $value;
+            }
+        }
+
+        $this->setAttribute('meta', $meta);
+        $this->save();
+
+        return $this;
+    }
 }

@@ -78,6 +78,10 @@ return [
         'default_published' => env('FORMFORGE_DEFAULT_PUBLISHED', true),
     ],
 
+    'categories' => [
+        'forbidden_names' => [],
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Drafts

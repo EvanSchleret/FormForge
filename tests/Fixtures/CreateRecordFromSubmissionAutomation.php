@@ -8,16 +8,18 @@ use EvanSchleret\FormForge\Automations\Contracts\SubmissionAutomation;
 use EvanSchleret\FormForge\Models\FormSubmission;
 use Illuminate\Support\Facades\DB;
 
-class CreateMembershipFromSubmissionAutomation implements SubmissionAutomation
+class CreateRecordFromSubmissionAutomation implements SubmissionAutomation
 {
     public function handle(FormSubmission $submission): void
     {
         $payload = is_array($submission->payload) ? $submission->payload : [];
 
-        DB::table('memberships')->insert([
+        $recordId = DB::table('records')->insertGetId([
             'form_submission_id' => (int) $submission->getKey(),
             'email' => (string) ($payload['email'] ?? ''),
             'plan' => (string) ($payload['plan'] ?? ''),
         ]);
+
+        $submission->meta('record_id', (int) $recordId);
     }
 }

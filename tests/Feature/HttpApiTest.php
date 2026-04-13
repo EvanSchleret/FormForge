@@ -768,6 +768,28 @@ it('prevents deleting system categories', function (): void {
         ->assertStatus(409);
 });
 
+it('blocks forbidden category names from configuration', function (): void {
+    config()->set('formforge.categories.forbidden_names', ['Internal', 'System']);
+
+    $this->postJson('/api/formforge/v1/categories', [
+        'name' => 'Internal',
+    ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('category');
+
+    $category = $this->postJson('/api/formforge/v1/categories', [
+        'name' => 'Allowed',
+    ])->assertCreated();
+
+    $categoryKey = (string) $category->json('data.key');
+
+    $this->patchJson("/api/formforge/v1/categories/{$categoryKey}", [
+        'name' => 'system',
+    ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('category');
+});
+
 it('scopes management forms and categories by ownership context', function (): void {
     config()->set('formforge.ownership.enabled', true);
     config()->set('formforge.ownership.required', true);
