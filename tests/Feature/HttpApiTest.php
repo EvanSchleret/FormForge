@@ -1155,6 +1155,47 @@ it('patches a form and creates a new draft revision', function (): void {
         ->assertJsonPath('data.title', 'Survey V2');
 });
 
+it('creates and auto publishes a form when requested', function (): void {
+    $response = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Auto Published Create',
+        'fields' => [
+            ['type' => 'text', 'name' => 'name', 'required' => true],
+        ],
+        'auto_publish' => true,
+    ]);
+
+    $response
+        ->assertCreated()
+        ->assertJsonPath('data.is_published', true)
+        ->assertJsonPath('data.version_number', 2);
+});
+
+it('patches and auto publishes a form when requested', function (): void {
+    $create = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Auto Published Patch V1',
+        'fields' => [
+            ['type' => 'text', 'name' => 'name', 'required' => true],
+        ],
+    ])->assertCreated();
+
+    $key = (string) $create->json('data.key');
+
+    $patch = $this->patchJson("/api/formforge/v1/forms/{$key}", [
+        'title' => 'Auto Published Patch V2',
+        'fields' => [
+            ['type' => 'text', 'name' => 'name', 'required' => true],
+            ['type' => 'email', 'name' => 'email', 'required' => true],
+        ],
+        'auto_publish' => true,
+    ]);
+
+    $patch
+        ->assertOk()
+        ->assertJsonPath('data.version_number', 3)
+        ->assertJsonPath('data.title', 'Auto Published Patch V2')
+        ->assertJsonPath('data.is_published', true);
+});
+
 it('clears form category when patched with explicit null', function (): void {
     $category = $this->postJson('/api/formforge/v1/categories', [
         'name' => 'Survey',

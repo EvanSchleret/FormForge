@@ -476,6 +476,9 @@ class FormManagementController
             }
 
             $definition = $mutations->create($payload, $request->user(), $owner);
+            if ($this->shouldAutoPublish($payload)) {
+                $definition = $mutations->publish((string) $definition->key, $request->user(), $owner);
+            }
             $data = $this->serializeFormDefinition($request, $mutations, $definition);
             $body = [
                 'data' => $data,
@@ -522,6 +525,9 @@ class FormManagementController
             }
 
             $definition = $mutations->patch($key, $payload, $request->user(), $owner);
+            if ($this->shouldAutoPublish($payload)) {
+                $definition = $mutations->publish((string) $definition->key, $request->user(), $owner);
+            }
             $data = $this->serializeFormDefinition($request, $mutations, $definition);
             $body = [
                 'data' => $data,
@@ -855,6 +861,19 @@ class FormManagementController
         }
 
         return $configured;
+    }
+
+    private function shouldAutoPublish(array $payload): bool
+    {
+        if (array_key_exists('auto_publish', $payload)) {
+            return $this->toBool($payload['auto_publish']);
+        }
+
+        if (array_key_exists('autoPublish', $payload)) {
+            return $this->toBool($payload['autoPublish']);
+        }
+
+        return false;
     }
 
     private function resolvedOwner(Request $request, string $action): ?OwnershipReference
