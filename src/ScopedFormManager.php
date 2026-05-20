@@ -11,6 +11,8 @@ use EvanSchleret\FormForge\Ownership\OwnershipReference;
 use EvanSchleret\FormForge\Persistence\FormDefinitionRepository;
 use EvanSchleret\FormForge\Submissions\SubmissionExportService;
 use EvanSchleret\FormForge\Submissions\SubmissionPrivacyService;
+use EvanSchleret\FormForge\Submissions\SubmissionValidator;
+use EvanSchleret\FormForge\Support\FormSchemaLayout;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -22,6 +24,7 @@ class ScopedFormManager
         private readonly FormMutationService $mutations,
         private readonly SubmissionExportService $submissionExports,
         private readonly SubmissionPrivacyService $submissionPrivacy,
+        private readonly SubmissionValidator $submissionValidator,
         private readonly OwnershipReference $owner,
     ) {
     }
@@ -113,6 +116,22 @@ class ScopedFormManager
         bool $withHeader = true,
     ): int {
         return $this->submissionExports->exportToPath($path, $formKey, $format, $filters, $this->owner, $withHeader);
+    }
+
+    public function validateField(string $formKey, string $field, mixed $value, ?string $version = null): array
+    {
+        $definition = $version === null
+            ? $this->latestActive($formKey)
+            : $this->find($formKey, $version);
+
+        if (! $definition instanceof FormDefinition) {
+            throw \EvanSchleret\FormForge\Exceptions\FormNotFoundException::forKey($formKey, $version);
+        }
+
+        $schema = is_array($definition->schema) ? $definition->schema : [];
+        $effectiveSchema = FormSchemaLayout::resolve($schema, [$field => $value]);
+
+        return $this->submissionValidator->validateField($effectiveSchema, $field, $value);
     }
 
     public function setGdprFormPolicy(string $formKey, array $input): SubmissionPrivacyPolicy

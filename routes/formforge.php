@@ -97,6 +97,8 @@ $registerRoutes = static function (?string $scopeName, callable $isEndpointEnabl
     if ($isEndpointEnabled('resolve')) {
         Route::middleware($routeMiddleware('resolve', 'resolve_latest', $scopeName))->post('/forms/{key}/resolve', [$resolveControllerClass, 'resolveLatest']);
         Route::middleware($routeMiddleware('resolve', 'resolve_version', $scopeName))->post('/forms/{key}/versions/{version}/resolve', [$resolveControllerClass, 'resolveVersion']);
+        Route::middleware($routeMiddleware('resolve', 'validate_field_latest', $scopeName))->post('/forms/{key}/validate-field', [$resolveControllerClass, 'validateFieldLatest']);
+        Route::middleware($routeMiddleware('resolve', 'validate_field_version', $scopeName))->post('/forms/{key}/versions/{version}/validate-field', [$resolveControllerClass, 'validateFieldVersion']);
     }
 
     if ($isEndpointEnabled('draft')) {

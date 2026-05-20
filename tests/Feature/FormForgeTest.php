@@ -149,6 +149,24 @@ it('rejects unknown fields by default and ignores them when configured', functio
     ]);
 });
 
+it('validates a single field through form methods', function (): void {
+    $key = 'field_validate_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->email('email')->required();
+
+    $form = Form::get($key, '1');
+
+    $valid = $form->validateField('email', 'evan@example.com');
+    $invalid = $form->validateField('email', 'not-an-email');
+
+    expect($valid['valid'])->toBeTrue();
+    expect($valid['errors'])->toBe([]);
+    expect($invalid['valid'])->toBeFalse();
+    expect($invalid['errors'])->toHaveKey('email');
+});
+
 it('normalizes primitive and date range values before persistence', function (): void {
     $key = 'normalize_' . Str::lower(Str::random(8));
 

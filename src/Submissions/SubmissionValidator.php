@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace EvanSchleret\FormForge\Submissions;
 
 use EvanSchleret\FormForge\Definition\FieldType;
+use EvanSchleret\FormForge\Exceptions\FormForgeException;
 use EvanSchleret\FormForge\Exceptions\UnknownFieldsException;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Validator;
@@ -12,6 +13,64 @@ use Illuminate\Validation\Rule;
 
 class SubmissionValidator
 {
+    public function validateField(array $schema, string $fieldName, mixed $value): array
+    {
+        $fieldName = trim($fieldName);
+
+        if ($fieldName === '') {
+            throw new FormForgeException('Field name is required.');
+        }
+
+        $fields = Arr::get($schema, 'fields', []);
+
+        if (! is_array($fields)) {
+            $fields = [];
+        }
+
+        $field = null;
+
+        foreach ($fields as $candidate) {
+            if (! is_array($candidate)) {
+                continue;
+            }
+
+            $name = trim((string) ($candidate['name'] ?? ''));
+
+            if ($name === $fieldName) {
+                $field = $candidate;
+                break;
+            }
+        }
+
+        if (! is_array($field)) {
+            throw UnknownFieldsException::fromFields([$fieldName]);
+        }
+
+        $payload = [$fieldName => $value];
+        $payload = $this->sanitizeNullishOptionalPayload([$field], $payload);
+        $rules = $this->compileRules([$field]);
+
+        $validator = Validator::make($payload, $rules);
+
+        if ((bool) config('formforge.validation.field.stop_on_first_failure', false)) {
+            $validator->stopOnFirstFailure();
+        }
+
+        if (! $validator->passes()) {
+            return [
+                'valid' => false,
+                'errors' => $validator->errors()->toArray(),
+                'validated' => [],
+            ];
+        }
+
+        return [
+            'valid' => true,
+            'errors' => [],
+            'validated' => $validator->validated(),
+        ];
+    }
+
     public function validate(array $schema, array $payload): array
     {
         $fields = Arr::get($schema, 'fields', []);

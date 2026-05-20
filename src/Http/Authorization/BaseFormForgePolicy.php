@@ -56,6 +56,16 @@ class BaseFormForgePolicy
         return false;
     }
 
+    public function resolve_validate_field_latest(mixed $user, FormForgeAuthorizationContext $context): bool
+    {
+        return false;
+    }
+
+    public function resolve_validate_field_version(mixed $user, FormForgeAuthorizationContext $context): bool
+    {
+        return false;
+    }
+
     public function draft_save(mixed $user, FormForgeAuthorizationContext $context): bool
     {
         return false;

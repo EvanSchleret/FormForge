@@ -148,6 +148,7 @@ class FormManager
             mutations: $this->mutations,
             submissionExports: $this->submissionExports,
             submissionPrivacy: $this->submissionPrivacy,
+            submissionValidator: app(\EvanSchleret\FormForge\Submissions\SubmissionValidator::class),
             owner: OwnershipReference::from($owner),
         );
     }
@@ -179,6 +180,11 @@ class FormManager
         bool $withHeader = true,
     ): int {
         return $this->submissionExports->exportToPath($path, $formKey, $format, $filters, null, $withHeader);
+    }
+
+    public function validateField(string $formKey, string $field, mixed $value, ?string $version = null): array
+    {
+        return $this->get($formKey, $version)->validateField($field, $value);
     }
 
     public function setGdprGlobalPolicy(array $input): \EvanSchleret\FormForge\Models\SubmissionPrivacyPolicy

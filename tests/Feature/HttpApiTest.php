@@ -1563,6 +1563,34 @@ it('returns not found on resolve endpoint when environment is not allowed', func
     ])->assertNotFound();
 });
 
+it('validates a single field over HTTP for latest and specific version', function (): void {
+    $key = 'validate_field_http_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->email('email')->required();
+
+    Form::define($key)
+        ->version('2')
+        ->email('email')->required();
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/validate-field", [
+        'field' => 'email',
+        'value' => 'valid@example.com',
+    ])
+        ->assertOk()
+        ->assertJsonPath('data.valid', true)
+        ->assertJsonPath('data.errors', []);
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/versions/2/validate-field", [
+        'field' => 'email',
+        'value' => 'invalid',
+    ])
+        ->assertOk()
+        ->assertJsonPath('data.valid', false)
+        ->assertJsonPath('data.errors.email.0', 'The email field must be a valid email address.');
+});
+
 it('stores, reads and deletes authenticated draft states', function (): void {
     config()->set('formforge.drafts.default_enabled', true);
 

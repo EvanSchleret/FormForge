@@ -90,6 +90,13 @@ class SubmissionService
         return $submission;
     }
 
+    public function validateField(array $schema, string $field, mixed $value): array
+    {
+        $effectiveSchema = FormSchemaLayout::resolve($schema, [$field => $value]);
+
+        return $this->validator->validateField($effectiveSchema, $field, $value);
+    }
+
     private function normalizePayload(array $schema, array $fields, array $validated, ?Model $submittedBy = null): array
     {
         $payload = [];

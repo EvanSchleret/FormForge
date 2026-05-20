@@ -18,6 +18,8 @@ class AuthorizationActionMap
             'upload.stage_version' => 'upload_stage_version',
             'resolve.resolve_latest' => 'resolve_resolve_latest',
             'resolve.resolve_version' => 'resolve_resolve_version',
+            'resolve.validate_field_latest' => 'resolve_validate_field_latest',
+            'resolve.validate_field_version' => 'resolve_validate_field_version',
             'draft.save' => 'draft_save',
             'draft.current' => 'draft_current',
             'draft.delete' => 'draft_delete',

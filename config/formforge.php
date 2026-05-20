@@ -164,6 +164,9 @@ return [
 
     'validation' => [
         'reject_unknown_fields' => true,
+        'field' => [
+            'stop_on_first_failure' => false,
+        ],
     ],
 
     /*

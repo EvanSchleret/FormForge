@@ -107,4 +107,9 @@ class FormInstance
             submissionMeta: $submissionMeta,
         );
     }
+
+    public function validateField(string $field, mixed $value): array
+    {
+        return $this->submissionService->validateField($this->schema, $field, $value);
+    }
 }

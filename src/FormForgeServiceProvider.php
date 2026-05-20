@@ -136,6 +136,7 @@ class FormForgeServiceProvider extends ServiceProvider
                 categories: $this->app->make(FormCategoryService::class),
             ),
         );
+
     }
 
     public function boot(): void

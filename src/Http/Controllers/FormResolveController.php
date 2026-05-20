@@ -7,6 +7,7 @@ namespace EvanSchleret\FormForge\Http\Controllers;
 use EvanSchleret\FormForge\FormInstance;
 use EvanSchleret\FormForge\FormManager;
 use EvanSchleret\FormForge\Support\FormSchemaLayout;
+use Illuminate\Validation\ValidationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -33,6 +34,26 @@ class FormResolveController
         return $this->resolve($request, $forms, $key, $version);
     }
 
+    public function validateFieldLatest(Request $request, FormManager $forms): JsonResponse
+    {
+        $key = $this->routeRequired($request, 'key');
+        $version = $request->input('version');
+
+        if (! is_string($version) || trim($version) === '') {
+            $version = null;
+        }
+
+        return $this->validateField($request, $forms, $key, $version);
+    }
+
+    public function validateFieldVersion(Request $request, FormManager $forms): JsonResponse
+    {
+        $key = $this->routeRequired($request, 'key');
+        $version = $this->routeRequired($request, 'version');
+
+        return $this->validateField($request, $forms, $key, $version);
+    }
+
     private function resolve(Request $request, FormManager $forms, string $key, ?string $version): JsonResponse
     {
         if (! $this->isResolveEnabled()) {
@@ -57,6 +78,29 @@ class FormResolveController
         return response()->json([
             'data' => [
                 'schema' => $resolved,
+            ],
+        ]);
+    }
+
+    private function validateField(Request $request, FormManager $forms, string $key, ?string $version): JsonResponse
+    {
+        $field = trim((string) $request->input('field', ''));
+        $value = $request->input('value');
+
+        if ($field === '') {
+            throw ValidationException::withMessages([
+                'field' => ['The field field is required.'],
+            ]);
+        }
+
+        $result = $forms->validateField($key, $field, $value, $version);
+
+        return response()->json([
+            'data' => [
+                'field' => $field,
+                'valid' => (bool) ($result['valid'] ?? false),
+                'errors' => $result['errors'] ?? [],
+                'validated' => $result['validated'] ?? [],
             ],
         ]);
     }
