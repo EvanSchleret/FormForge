@@ -29,15 +29,24 @@ class SubmissionValidator
 
         $field = null;
 
+        $canonicalName = null;
+
         foreach ($fields as $candidate) {
             if (! is_array($candidate)) {
                 continue;
             }
 
             $name = trim((string) ($candidate['name'] ?? ''));
+            $aliases = array_values(array_unique(array_filter([
+                $name,
+                trim((string) ($candidate['field_key'] ?? '')),
+                trim((string) ($candidate['key'] ?? '')),
+                trim((string) ($candidate['id'] ?? '')),
+            ], static fn (string $alias): bool => $alias !== '')));
 
-            if ($name === $fieldName) {
+            if (in_array($fieldName, $aliases, true)) {
                 $field = $candidate;
+                $canonicalName = $name;
                 break;
             }
         }
@@ -46,7 +55,7 @@ class SubmissionValidator
             throw UnknownFieldsException::fromFields([$fieldName]);
         }
 
-        $payload = [$fieldName => $value];
+        $payload = [$canonicalName => $value];
         $payload = $this->sanitizeNullishOptionalPayload([$field], $payload);
         $rules = $this->compileRules([$field]);
 

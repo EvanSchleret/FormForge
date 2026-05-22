@@ -19,6 +19,7 @@ use EvanSchleret\FormForge\Tests\Fixtures\ActiveFormKeyAutomationResolver;
 use EvanSchleret\FormForge\Tests\Fixtures\CreateRecordFromSubmissionAutomation;
 use EvanSchleret\FormForge\Tests\Fixtures\Models\CustomFormSubmission;
 use EvanSchleret\FormForge\Tests\Fixtures\User;
+use EvanSchleret\FormForge\Submissions\SubmissionValidator;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -157,7 +158,6 @@ it('validates a single field through form methods', function (): void {
         ->email('email')->required();
 
     $form = Form::get($key, '1');
-
     $valid = $form->validateField('email', 'evan@example.com');
     $invalid = $form->validateField('email', 'not-an-email');
 
@@ -165,6 +165,33 @@ it('validates a single field through form methods', function (): void {
     expect($valid['errors'])->toBe([]);
     expect($invalid['valid'])->toBeFalse();
     expect($invalid['errors'])->toHaveKey('email');
+});
+
+it('validates a single field through aliases', function (): void {
+    $validator = app(SubmissionValidator::class);
+    $schema = [
+        'fields' => [[
+            'name' => 'email',
+            'field_key' => ' email_field_key ',
+            'key' => ' email_key ',
+            'id' => ' email_id ',
+            'type' => 'email',
+            'rules' => ['required', 'email'],
+        ]],
+    ];
+
+    $validByName = $validator->validateField($schema, 'email', 'evan@example.com');
+    $validByFieldKey = $validator->validateField($schema, 'email_field_key', 'evan@example.com');
+    $validByKey = $validator->validateField($schema, 'email_key', 'evan@example.com');
+    $validById = $validator->validateField($schema, 'email_id', 'evan@example.com');
+
+    expect($validByName['valid'])->toBeTrue();
+    expect($validByFieldKey['valid'])->toBeTrue();
+    expect($validByKey['valid'])->toBeTrue();
+    expect($validById['valid'])->toBeTrue();
+
+    expect(static fn () => $validator->validateField($schema, 'unknown_field_alias', 'evan@example.com'))
+        ->toThrow(UnknownFieldsException::class);
 });
 
 it('normalizes primitive and date range values before persistence', function (): void {
