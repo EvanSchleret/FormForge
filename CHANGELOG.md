@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog.
 
+## v1.2.1 - 2026-05-22
+
+### v1.2.1
+
+#### Fixed
+
+- `SubmissionValidator::validateField()` now resolves fields using aliases, not only `name`.
+- Accepted field identifiers are now: `name`, `field_key`, `key`, and `id` (normalized via trim + string cast).
+- Validation payload/rules still use the field canonical `name`, preserving existing validation behavior.
+- Unknown identifiers still raise `UnknownFieldsException` when no alias matches.
+
+#### Tests
+
+- Added/updated feature tests to cover:
+  - `validateField('name', value)` (existing behavior)
+  - `validateField('field_key', value)`
+  - `validateField('key', value)`
+  - `validateField('id', value)`
+  - unknown key still throws `UnknownFieldsException`
+  
+
+**Full Changelog**: https://github.com/EvanSchleret/FormForge/compare/v1.2.0...v1.2.1
+
 ## v1.2.0 - 2026-05-20
 
 ### v1.2.0
@@ -11,27 +34,34 @@ The format is based on Keep a Changelog.
 #### Added
 
 - Single-field validation capability for FormForge schemas, allowing validation of one input against one question in one form without creating a submission.
+  
 - New public API methods:
+  
   - `FormInstance::validateField(string $field, mixed $value): array`
   - `FormManager::validateField(string $formKey, string $field, mixed $value, ?string $version = null): array`
   - `ScopedFormManager::validateField(string $formKey, string $field, mixed $value, ?string $version = null): array`
   
 - New HTTP endpoints (available in both scoped and non-scoped route trees):
+  
   - `POST /forms/{key}/validate-field`
   - `POST /forms/{key}/versions/{version}/validate-field`
   
 - New validation config option:
+  
   - `formforge.validation.field.stop_on_first_failure` (default: `false`)
   
 
 #### Changed
 
 - Resolve endpoint group now also exposes targeted field validation routes, reusing existing endpoint middleware/auth/action routing patterns.
+  
 - Authorization action map extended with:
+  
   - `resolve.validate_field_latest`
   - `resolve.validate_field_version`
   
 - Base policy contract extended with:
+  
   - `resolve_validate_field_latest(...)`
   - `resolve_validate_field_version(...)`
   
@@ -99,11 +129,13 @@ php artisan formforge:install:merge --skip-migrations --no-backup
 
 
 
+
 ```
 #### DB Migration
 
 ```bash
 php artisan migrate
+
 
 
 
