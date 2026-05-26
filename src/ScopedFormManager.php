@@ -11,7 +11,7 @@ use EvanSchleret\FormForge\Ownership\OwnershipReference;
 use EvanSchleret\FormForge\Persistence\FormDefinitionRepository;
 use EvanSchleret\FormForge\Submissions\SubmissionExportService;
 use EvanSchleret\FormForge\Submissions\SubmissionPrivacyService;
-use EvanSchleret\FormForge\Submissions\SubmissionValidator;
+use EvanSchleret\FormForge\Submissions\SubmissionService;
 use EvanSchleret\FormForge\Support\FormSchemaLayout;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -24,7 +24,7 @@ class ScopedFormManager
         private readonly FormMutationService $mutations,
         private readonly SubmissionExportService $submissionExports,
         private readonly SubmissionPrivacyService $submissionPrivacy,
-        private readonly SubmissionValidator $submissionValidator,
+        private readonly SubmissionService $submissionService,
         private readonly OwnershipReference $owner,
     ) {
     }
@@ -131,7 +131,52 @@ class ScopedFormManager
         $schema = is_array($definition->schema) ? $definition->schema : [];
         $effectiveSchema = FormSchemaLayout::resolve($schema, [$field => $value]);
 
-        return $this->submissionValidator->validateField($effectiveSchema, $field, $value);
+        return $this->submissionService->validateField($effectiveSchema, $field, $value);
+    }
+
+    public function describeFields(string $formKey, ?string $version = null): array
+    {
+        $definition = $version === null
+            ? $this->latestActive($formKey)
+            : $this->find($formKey, $version);
+
+        if (! $definition instanceof FormDefinition) {
+            throw \EvanSchleret\FormForge\Exceptions\FormNotFoundException::forKey($formKey, $version);
+        }
+
+        $schema = is_array($definition->schema) ? $definition->schema : [];
+
+        return $this->submissionService->describeFields($schema);
+    }
+
+    public function resolveField(string $formKey, string $identifier, ?string $version = null): ?array
+    {
+        $definition = $version === null
+            ? $this->latestActive($formKey)
+            : $this->find($formKey, $version);
+
+        if (! $definition instanceof FormDefinition) {
+            throw \EvanSchleret\FormForge\Exceptions\FormNotFoundException::forKey($formKey, $version);
+        }
+
+        $schema = is_array($definition->schema) ? $definition->schema : [];
+
+        return $this->submissionService->resolveField($schema, $identifier);
+    }
+
+    public function validateFields(string $formKey, array $payload, array $onlyFields = [], ?string $version = null): array
+    {
+        $definition = $version === null
+            ? $this->latestActive($formKey)
+            : $this->find($formKey, $version);
+
+        if (! $definition instanceof FormDefinition) {
+            throw \EvanSchleret\FormForge\Exceptions\FormNotFoundException::forKey($formKey, $version);
+        }
+
+        $schema = is_array($definition->schema) ? $definition->schema : [];
+
+        return $this->submissionService->validateFields($schema, $payload, $onlyFields);
     }
 
     public function setGdprFormPolicy(string $formKey, array $input): SubmissionPrivacyPolicy

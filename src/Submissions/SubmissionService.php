@@ -97,6 +97,27 @@ class SubmissionService
         return $this->validator->validateField($effectiveSchema, $field, $value);
     }
 
+    public function describeFields(array $schema): array
+    {
+        $effectiveSchema = FormSchemaLayout::resolve($schema);
+
+        return $this->validator->describeFields($effectiveSchema);
+    }
+
+    public function resolveField(array $schema, string $identifier): ?array
+    {
+        $effectiveSchema = FormSchemaLayout::resolve($schema);
+
+        return $this->validator->resolveField($effectiveSchema, $identifier);
+    }
+
+    public function validateFields(array $schema, array $payload, array $onlyFields = []): array
+    {
+        $effectiveSchema = FormSchemaLayout::resolve($schema, $payload);
+
+        return $this->validator->validateFields($effectiveSchema, $payload, $onlyFields);
+    }
+
     private function normalizePayload(array $schema, array $fields, array $validated, ?Model $submittedBy = null): array
     {
         $payload = [];

@@ -148,7 +148,7 @@ class FormManager
             mutations: $this->mutations,
             submissionExports: $this->submissionExports,
             submissionPrivacy: $this->submissionPrivacy,
-            submissionValidator: app(\EvanSchleret\FormForge\Submissions\SubmissionValidator::class),
+            submissionService: $this->submissionService,
             owner: OwnershipReference::from($owner),
         );
     }
@@ -185,6 +185,21 @@ class FormManager
     public function validateField(string $formKey, string $field, mixed $value, ?string $version = null): array
     {
         return $this->get($formKey, $version)->validateField($field, $value);
+    }
+
+    public function describeFields(string $formKey, ?string $version = null): array
+    {
+        return $this->get($formKey, $version)->describeFields();
+    }
+
+    public function resolveField(string $formKey, string $identifier, ?string $version = null): ?array
+    {
+        return $this->get($formKey, $version)->resolveField($identifier);
+    }
+
+    public function validateFields(string $formKey, array $payload, array $onlyFields = [], ?string $version = null): array
+    {
+        return $this->get($formKey, $version)->validateFields($payload, $onlyFields);
     }
 
     public function setGdprGlobalPolicy(array $input): \EvanSchleret\FormForge\Models\SubmissionPrivacyPolicy

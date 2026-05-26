@@ -194,6 +194,103 @@ it('validates a single field through aliases', function (): void {
         ->toThrow(UnknownFieldsException::class);
 });
 
+it('describes fields with normalized descriptors', function (): void {
+    $key = 'describe_fields_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->select('country')->required()->options([
+            ['label' => 'France', 'value' => 'fr'],
+            ['label' => 'Switzerland', 'value' => 'ch'],
+        ])
+        ->text('nickname');
+
+    $descriptors = Form::get($key, '1')->describeFields();
+    $country = collect($descriptors)->firstWhere('name', 'country');
+    $nickname = collect($descriptors)->firstWhere('name', 'nickname');
+
+    expect($country)->not->toBeNull();
+    expect($country['required'])->toBeTrue();
+    expect($country['options'])->toHaveCount(2);
+    expect($country['lookup_keys'])->toContain('country');
+    expect($country['field_key'])->not->toBeNull();
+    expect($country['rules'])->toContain('required');
+
+    expect($nickname)->not->toBeNull();
+    expect($nickname['required'])->toBeFalse();
+    expect($nickname['options'])->toBe([]);
+});
+
+it('validates partial fields subset and reports canonical errors', function (): void {
+    $key = 'validate_fields_subset_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->email('email')->required()
+        ->number('age')->required();
+
+    $form = Form::get($key, '1');
+    $invalid = $form->validateFields([
+        'email' => 'invalid',
+        'age' => 'abc',
+    ]);
+
+    expect($invalid['valid'])->toBeFalse();
+    expect($invalid['errors'])->toHaveKey('email');
+    expect($invalid['errors'])->toHaveKey('age');
+
+    $valid = $form->validateFields([
+        'email' => 'evan@example.com',
+        'age' => 42,
+    ], ['email']);
+
+    expect($valid['valid'])->toBeTrue();
+    expect($valid['validated'])->toHaveKey('email', 'evan@example.com');
+    expect($valid['validated'])->not->toHaveKey('age');
+});
+
+it('validates partial fields with aliases and unresolved identifiers', function (): void {
+    $validator = app(SubmissionValidator::class);
+    $schema = [
+        'fields' => [[
+            'name' => 'email',
+            'field_key' => 'email_field_key',
+            'key' => 'email_key',
+            'id' => 'email_id',
+            'type' => 'email',
+            'rules' => ['required', 'email'],
+        ]],
+    ];
+
+    $valid = $validator->validateFields($schema, ['email_field_key' => 'evan@example.com'], ['email_id']);
+    expect($valid['valid'])->toBeTrue();
+    expect($valid['validated'])->toHaveKey('email', 'evan@example.com');
+
+    $invalid = $validator->validateFields($schema, ['email' => 'evan@example.com'], ['missing_alias']);
+    expect($invalid['valid'])->toBeFalse();
+    expect($invalid['errors'])->toHaveKey('missing_alias');
+});
+
+it('ignores unknown payload keys in partial validation', function (): void {
+    $validator = app(SubmissionValidator::class);
+    $schema = [
+        'fields' => [[
+            'name' => 'email',
+            'type' => 'email',
+            'rules' => ['required', 'email'],
+        ]],
+    ];
+
+    $result = $validator->validateFields($schema, [
+        'email' => 'evan@example.com',
+        'unknown' => 'value',
+    ]);
+
+    expect($result['valid'])->toBeTrue();
+    expect($result['errors'])->toBe([]);
+    expect($result['validated'])->toBe(['email' => 'evan@example.com']);
+});
+
 it('normalizes primitive and date range values before persistence', function (): void {
     $key = 'normalize_' . Str::lower(Str::random(8));
 

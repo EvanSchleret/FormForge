@@ -112,4 +112,19 @@ class FormInstance
     {
         return $this->submissionService->validateField($this->schema, $field, $value);
     }
+
+    public function describeFields(): array
+    {
+        return $this->submissionService->describeFields($this->schema);
+    }
+
+    public function resolveField(string $identifier): ?array
+    {
+        return $this->submissionService->resolveField($this->schema, $identifier);
+    }
+
+    public function validateFields(array $payload, array $onlyFields = []): array
+    {
+        return $this->submissionService->validateFields($this->schema, $payload, $onlyFields);
+    }
 }

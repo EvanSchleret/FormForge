@@ -13,6 +13,68 @@ use Illuminate\Validation\Rule;
 
 class SubmissionValidator
 {
+    public function describeFields(array $schema): array
+    {
+        $fields = Arr::get($schema, 'fields', []);
+
+        if (! is_array($fields)) {
+            return [];
+        }
+
+        $descriptors = [];
+
+        foreach ($fields as $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+
+            $name = trim((string) ($field['name'] ?? ''));
+            $type = trim((string) ($field['type'] ?? ''));
+
+            if ($name === '' || $type === '') {
+                continue;
+            }
+
+            $fieldKey = $this->nullableTrimmed($field['field_key'] ?? null);
+            $key = $this->nullableTrimmed($field['key'] ?? null);
+            $id = $this->nullableTrimmed($field['id'] ?? null);
+            $label = $this->nullableTrimmed($field['label'] ?? null);
+
+            $descriptors[] = [
+                'name' => $name,
+                'field_key' => $fieldKey,
+                'key' => $key,
+                'id' => $id,
+                'label' => $label,
+                'type' => $type,
+                'required' => (bool) ($field['required'] ?? false),
+                'rules' => $this->normalizeRules($field['rules'] ?? []),
+                'options' => $this->normalizeOptions($field['options'] ?? []),
+                'default' => $field['default'] ?? null,
+                'lookup_keys' => $this->lookupKeys($name, $fieldKey, $key, $id),
+            ];
+        }
+
+        return $descriptors;
+    }
+
+    public function resolveField(array $schema, string $identifier): ?array
+    {
+        $needle = trim($identifier);
+
+        if ($needle === '') {
+            return null;
+        }
+
+        foreach ($this->describeFields($schema) as $field) {
+            if (in_array($needle, $field['lookup_keys'], true)) {
+                return $field;
+            }
+        }
+
+        return null;
+    }
+
     public function validateField(array $schema, string $fieldName, mixed $value): array
     {
         $fieldName = trim($fieldName);
@@ -21,41 +83,13 @@ class SubmissionValidator
             throw new FormForgeException('Field name is required.');
         }
 
-        $fields = Arr::get($schema, 'fields', []);
-
-        if (! is_array($fields)) {
-            $fields = [];
-        }
-
-        $field = null;
-
-        $canonicalName = null;
-
-        foreach ($fields as $candidate) {
-            if (! is_array($candidate)) {
-                continue;
-            }
-
-            $name = trim((string) ($candidate['name'] ?? ''));
-            $aliases = array_values(array_unique(array_filter([
-                $name,
-                trim((string) ($candidate['field_key'] ?? '')),
-                trim((string) ($candidate['key'] ?? '')),
-                trim((string) ($candidate['id'] ?? '')),
-            ], static fn (string $alias): bool => $alias !== '')));
-
-            if (in_array($fieldName, $aliases, true)) {
-                $field = $candidate;
-                $canonicalName = $name;
-                break;
-            }
-        }
+        $field = $this->resolveField($schema, $fieldName);
 
         if (! is_array($field)) {
             throw UnknownFieldsException::fromFields([$fieldName]);
         }
 
-        $payload = [$canonicalName => $value];
+        $payload = [$field['name'] => $value];
         $payload = $this->sanitizeNullishOptionalPayload([$field], $payload);
         $rules = $this->compileRules([$field]);
 
@@ -120,6 +154,94 @@ class SubmissionValidator
         $rules = $this->compileRules($fields);
 
         return Validator::make($payload, $rules)->validate();
+    }
+
+    public function validateFields(array $schema, array $payload, array $onlyFields = []): array
+    {
+        $descriptors = $this->describeFields($schema);
+        $byName = [];
+
+        foreach ($descriptors as $field) {
+            $byName[$field['name']] = $field;
+        }
+
+        $resolved = [];
+        $errors = [];
+
+        if ($onlyFields === []) {
+            foreach ($payload as $key => $_value) {
+                if (! is_string($key)) {
+                    continue;
+                }
+
+                $field = $this->resolveField($schema, $key);
+
+                if (is_array($field)) {
+                    $resolved[$field['name']] = $field;
+                }
+            }
+        } else {
+            foreach ($onlyFields as $requested) {
+                $identifier = trim((string) $requested);
+
+                if ($identifier === '') {
+                    continue;
+                }
+
+                $field = $this->resolveField($schema, $identifier);
+
+                if (! is_array($field)) {
+                    $errors[$identifier] = ['Unknown field identifier.'];
+                    continue;
+                }
+
+                $resolved[$field['name']] = $field;
+            }
+        }
+
+        if ($resolved === []) {
+            return [
+                'valid' => $errors === [],
+                'errors' => $errors,
+                'validated' => [],
+            ];
+        }
+
+        $subsetPayload = [];
+
+        foreach ($resolved as $name => $field) {
+            foreach ($field['lookup_keys'] as $lookup) {
+                if (array_key_exists($lookup, $payload)) {
+                    $subsetPayload[$name] = $payload[$lookup];
+                    break;
+                }
+            }
+        }
+
+        $fieldsForValidation = [];
+        foreach (array_keys($resolved) as $name) {
+            if (isset($byName[$name])) {
+                $fieldsForValidation[] = $byName[$name];
+            }
+        }
+
+        $subsetPayload = $this->sanitizeNullishOptionalPayload($fieldsForValidation, $subsetPayload);
+        $rules = $this->compileRules($fieldsForValidation);
+        $validator = Validator::make($subsetPayload, $rules);
+
+        if ((bool) config('formforge.validation.field.stop_on_first_failure', false)) {
+            $validator->stopOnFirstFailure();
+        }
+
+        if (! $validator->passes()) {
+            $errors = array_merge($errors, $validator->errors()->toArray());
+        }
+
+        return [
+            'valid' => $errors === [],
+            'errors' => $errors,
+            'validated' => $errors === [] ? $validator->validated() : [],
+        ];
     }
 
     private function compileRules(array $fields): array
@@ -313,6 +435,33 @@ class SubmissionValidator
         }
 
         return $normalized;
+    }
+
+    private function normalizeOptions(mixed $options): array
+    {
+        if (! is_array($options)) {
+            return [];
+        }
+
+        return array_values($options);
+    }
+
+    private function lookupKeys(string $name, ?string $fieldKey, ?string $key, ?string $id): array
+    {
+        $values = [$name, $fieldKey, $key, $id];
+
+        return array_values(array_unique(array_filter($values, static fn (?string $value): bool => is_string($value) && $value !== '')));
+    }
+
+    private function nullableTrimmed(mixed $value): ?string
+    {
+        if (! is_string($value) && ! is_int($value) && ! is_float($value)) {
+            return null;
+        }
+
+        $trimmed = trim((string) $value);
+
+        return $trimmed === '' ? null : $trimmed;
     }
 
     private function sanitizeNullishOptionalPayload(array $fields, array $payload): array
