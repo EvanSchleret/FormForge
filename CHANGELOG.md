@@ -4,6 +4,53 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog.
 
+## v1.3.0 - 2026-05-26
+
+### v1.3.0
+
+#### Added
+
+- New normalized field descriptor API for FormForge schemas:
+  - `describeFields()` on `FormInstance`, `FormManager`, `ScopedFormManager`
+  
+- New centralized field resolution API:
+  - `resolveField(...)` matching `name`, `field_key`, `key`, `id`
+  
+- New partial batch validation API:
+  - `validateFields(...)` for subset-oriented field validation
+  - Supports alias identifiers in `onlyFields`
+  - Returns errors keyed by canonical field `name`
+  - Returns explicit errors for unresolved `onlyFields` identifiers
+  
+
+#### Changed
+
+- `validateField(...)` now uses centralized field resolution to avoid divergence in alias matching logic
+
+#### Behavior notes
+
+- Existing APIs remain intact:
+  - `validate(...)` unchanged (including unknown-field handling)
+  - `validateField(...)` signature and response shape unchanged
+  
+- Partial validation (`validateFields`) is field-oriented:
+  - Unknown payload keys are ignored
+  - No global unknown-fields rejection in this flow
+  
+
+#### Tests
+
+- Added coverage for:
+  - alias resolution via `name`, `field_key`, `key`, `id`
+  - normalized descriptors (`options`, `required`, `lookup_keys`, etc.)
+  - partial subset validation (valid/invalid)
+  - `onlyFields` alias support
+  - unresolved identifier errors
+  - non-regression for existing `validate()` / `validateField()` behavior
+  
+
+**Full Changelog**: https://github.com/EvanSchleret/FormForge/compare/v1.2.1...v1.3.0
+
 ## v1.2.1 - 2026-05-22
 
 ### v1.2.1
@@ -130,11 +177,13 @@ php artisan formforge:install:merge --skip-migrations --no-backup
 
 
 
+
 ```
 #### DB Migration
 
 ```bash
 php artisan migrate
+
 
 
 
