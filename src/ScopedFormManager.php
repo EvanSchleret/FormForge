@@ -118,7 +118,7 @@ class ScopedFormManager
         return $this->submissionExports->exportToPath($path, $formKey, $format, $filters, $this->owner, $withHeader);
     }
 
-    public function validateField(string $formKey, string $field, mixed $value, ?string $version = null): array
+    public function validateField(string $formKey, string $field, mixed $value, ?string $version = null, ?string $locale = null): array
     {
         $definition = $version === null
             ? $this->latestActive($formKey)
@@ -131,7 +131,7 @@ class ScopedFormManager
         $schema = is_array($definition->schema) ? $definition->schema : [];
         $effectiveSchema = FormSchemaLayout::resolve($schema, [$field => $value]);
 
-        return $this->submissionService->validateField($effectiveSchema, $field, $value);
+        return $this->submissionService->validateFieldWithLocale($effectiveSchema, $field, $value, $locale);
     }
 
     public function describeFields(string $formKey, ?string $version = null): array
@@ -164,7 +164,7 @@ class ScopedFormManager
         return $this->submissionService->resolveField($schema, $identifier);
     }
 
-    public function validateFields(string $formKey, array $payload, array $onlyFields = [], ?string $version = null): array
+    public function validateFields(string $formKey, array $payload, array $onlyFields = [], ?string $version = null, ?string $locale = null): array
     {
         $definition = $version === null
             ? $this->latestActive($formKey)
@@ -176,7 +176,7 @@ class ScopedFormManager
 
         $schema = is_array($definition->schema) ? $definition->schema : [];
 
-        return $this->submissionService->validateFields($schema, $payload, $onlyFields);
+        return $this->submissionService->validateFieldsWithLocale($schema, $payload, $onlyFields, $locale);
     }
 
     public function setGdprFormPolicy(string $formKey, array $input): SubmissionPrivacyPolicy

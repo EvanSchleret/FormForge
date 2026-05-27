@@ -42,7 +42,7 @@ class SubmissionExportService
         $stream = fopen('php://temp', 'w+b');
 
         if (! is_resource($stream)) {
-            throw new FormForgeException('Unable to open temporary stream for export.');
+            throw new FormForgeException(trans('formforge::messages.export_temp_stream_open_failed'));
         }
 
         try {
@@ -93,7 +93,7 @@ class SubmissionExportService
                 $stream = fopen('php://output', 'wb');
 
                 if (! is_resource($stream)) {
-                    throw new FormForgeException('Unable to open output stream for export.');
+                    throw new FormForgeException(trans('formforge::messages.export_output_stream_open_failed'));
                 }
 
                 try {

@@ -134,19 +134,19 @@ class FormSubmissionController
 
         if ($resolved === null) {
             throw ValidationException::withMessages([
-                'test' => ['Invalid test mode flag value.'],
+                'test' => [trans('formforge::messages.submission_test_invalid')],
             ]);
         }
 
         if ($resolved && ! $enabled) {
             throw ValidationException::withMessages([
-                'test' => ['Test submissions are disabled.'],
+                'test' => [trans('formforge::messages.submission_test_disabled')],
             ]);
         }
 
         if ($resolved && ! $this->isTestModeAvailable()) {
             throw ValidationException::withMessages([
-                'test' => ['Test submissions are not available in this environment.'],
+                'test' => [trans('formforge::messages.submission_test_unavailable')],
             ]);
         }
 
@@ -168,7 +168,7 @@ class FormSubmissionController
         }
 
         throw ValidationException::withMessages([
-            'form' => ['This form is not published yet.'],
+            'form' => [trans('formforge::messages.form_not_published')],
         ]);
     }
 
@@ -245,13 +245,13 @@ class FormSubmissionController
         $value = $request->route($name);
 
         if (! is_scalar($value)) {
-            throw new NotFoundHttpException("Route parameter [{$name}] is required.");
+            throw new NotFoundHttpException(trans('formforge::messages.route_param_required', ['name' => $name]));
         }
 
         $resolved = trim((string) $value);
 
         if ($resolved === '') {
-            throw new NotFoundHttpException("Route parameter [{$name}] is required.");
+            throw new NotFoundHttpException(trans('formforge::messages.route_param_required', ['name' => $name]));
         }
 
         return $resolved;

@@ -49,7 +49,7 @@ class FormUploadController
     ): JsonResponse {
         try {
             if ((string) config('formforge.uploads.mode', 'managed') !== 'staged') {
-                throw new FormForgeException('Upload staging endpoint requires uploads.mode=staged.');
+                throw new FormForgeException(trans('formforge::messages.upload_staged_mode_required'));
             }
 
             $form = $request->attributes->get('formforge.form');
@@ -109,7 +109,7 @@ class FormUploadController
         }
 
         throw ValidationException::withMessages([
-            'field' => ['Unable to resolve a file field. Provide field_key or field name.'],
+            'field' => [trans('formforge::messages.upload_field_unresolved')],
         ]);
     }
 
@@ -129,7 +129,7 @@ class FormUploadController
         }
 
         throw ValidationException::withMessages([
-            'file' => ['A file upload is required. Send multipart/form-data with a file part.'],
+            'file' => [trans('formforge::messages.upload_file_required')],
         ]);
     }
 
@@ -142,7 +142,7 @@ class FormUploadController
         }
 
         throw ValidationException::withMessages([
-            'form' => ['This form is not published yet.'],
+            'form' => [trans('formforge::messages.form_not_published')],
         ]);
     }
 
@@ -161,13 +161,13 @@ class FormUploadController
         $value = $request->route($name);
 
         if (! is_scalar($value)) {
-            throw new NotFoundHttpException("Route parameter [{$name}] is required.");
+            throw new NotFoundHttpException(trans('formforge::messages.route_param_required', ['name' => $name]));
         }
 
         $resolved = trim((string) $value);
 
         if ($resolved === '') {
-            throw new NotFoundHttpException("Route parameter [{$name}] is required.");
+            throw new NotFoundHttpException(trans('formforge::messages.route_param_required', ['name' => $name]));
         }
 
         return $resolved;

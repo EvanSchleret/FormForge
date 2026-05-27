@@ -9,9 +9,9 @@ class FormNotFoundException extends FormForgeException
     public static function forKey(string $key, ?string $version = null): self
     {
         if ($version === null) {
-            return new self("Form [{$key}] was not found.");
+            return new self(trans('formforge::validation.form_not_found', ['key' => $key]));
         }
 
-        return new self("Form [{$key}] with version [{$version}] was not found.");
+        return new self(trans('formforge::validation.form_version_not_found', ['key' => $key, 'version' => $version]));
     }
 }

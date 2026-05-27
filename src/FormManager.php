@@ -182,9 +182,9 @@ class FormManager
         return $this->submissionExports->exportToPath($path, $formKey, $format, $filters, null, $withHeader);
     }
 
-    public function validateField(string $formKey, string $field, mixed $value, ?string $version = null): array
+    public function validateField(string $formKey, string $field, mixed $value, ?string $version = null, ?string $locale = null): array
     {
-        return $this->get($formKey, $version)->validateField($field, $value);
+        return $this->get($formKey, $version)->validateField($field, $value, $locale);
     }
 
     public function describeFields(string $formKey, ?string $version = null): array
@@ -197,9 +197,9 @@ class FormManager
         return $this->get($formKey, $version)->resolveField($identifier);
     }
 
-    public function validateFields(string $formKey, array $payload, array $onlyFields = [], ?string $version = null): array
+    public function validateFields(string $formKey, array $payload, array $onlyFields = [], ?string $version = null, ?string $locale = null): array
     {
-        return $this->get($formKey, $version)->validateFields($payload, $onlyFields);
+        return $this->get($formKey, $version)->validateFields($payload, $onlyFields, $locale);
     }
 
     public function setGdprGlobalPolicy(array $input): \EvanSchleret\FormForge\Models\SubmissionPrivacyPolicy

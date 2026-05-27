@@ -142,6 +142,7 @@ class FormForgeServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->loadMigrationsFrom(dirname(__DIR__) . '/database/migrations');
+        $this->loadTranslationsFrom(dirname(__DIR__) . '/lang', 'formforge');
 
         $this->publishes([
             dirname(__DIR__) . '/config/formforge.php' => config_path('formforge.php'),
@@ -150,6 +151,10 @@ class FormForgeServiceProvider extends ServiceProvider
         $this->publishes([
             dirname(__DIR__) . '/database/migrations' => database_path('migrations'),
         ], 'formforge-migrations');
+
+        $this->publishes([
+            dirname(__DIR__) . '/lang' => lang_path('vendor/formforge'),
+        ], 'formforge-lang');
 
         $router = $this->app->make('router');
         $router->aliasMiddleware('formforge.endpoint', ApplyEndpointOptions::class);

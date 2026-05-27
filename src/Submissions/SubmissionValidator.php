@@ -7,12 +7,18 @@ namespace EvanSchleret\FormForge\Submissions;
 use EvanSchleret\FormForge\Definition\FieldType;
 use EvanSchleret\FormForge\Exceptions\FormForgeException;
 use EvanSchleret\FormForge\Exceptions\UnknownFieldsException;
+use EvanSchleret\FormForge\Support\ValidationLocaleResolver;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 
 class SubmissionValidator
 {
+    public function __construct(
+        private readonly ValidationLocaleResolver $localeResolver = new ValidationLocaleResolver(),
+    ) {
+    }
+
     public function describeFields(array $schema): array
     {
         $fields = Arr::get($schema, 'fields', []);
@@ -75,46 +81,48 @@ class SubmissionValidator
         return null;
     }
 
-    public function validateField(array $schema, string $fieldName, mixed $value): array
+    public function validateField(array $schema, string $fieldName, mixed $value, ?string $locale = null): array
     {
-        $fieldName = trim($fieldName);
+        return $this->withLocale($locale, function () use ($schema, $fieldName, $value): array {
+            $fieldName = trim($fieldName);
 
-        if ($fieldName === '') {
-            throw new FormForgeException('Field name is required.');
-        }
+            if ($fieldName === '') {
+                throw new FormForgeException(trans('formforge::validation.field_name_required'));
+            }
 
-        $field = $this->resolveField($schema, $fieldName);
+            $field = $this->resolveField($schema, $fieldName);
 
-        if (! is_array($field)) {
-            throw UnknownFieldsException::fromFields([$fieldName]);
-        }
+            if (! is_array($field)) {
+                throw UnknownFieldsException::fromFields([$fieldName]);
+            }
 
-        $payload = [$field['name'] => $value];
-        $payload = $this->sanitizeNullishOptionalPayload([$field], $payload);
-        $rules = $this->compileRules([$field]);
+            $payload = [$field['name'] => $value];
+            $payload = $this->sanitizeNullishOptionalPayload([$field], $payload);
+            $rules = $this->compileRules([$field]);
 
-        $validator = Validator::make($payload, $rules);
+            $validator = Validator::make($payload, $rules);
 
-        if ((bool) config('formforge.validation.field.stop_on_first_failure', false)) {
-            $validator->stopOnFirstFailure();
-        }
+            if ((bool) config('formforge.validation.field.stop_on_first_failure', false)) {
+                $validator->stopOnFirstFailure();
+            }
 
-        if (! $validator->passes()) {
+            if (! $validator->passes()) {
+                return [
+                    'valid' => false,
+                    'errors' => $validator->errors()->toArray(),
+                    'validated' => [],
+                ];
+            }
+
             return [
-                'valid' => false,
-                'errors' => $validator->errors()->toArray(),
-                'validated' => [],
+                'valid' => true,
+                'errors' => [],
+                'validated' => $validator->validated(),
             ];
-        }
-
-        return [
-            'valid' => true,
-            'errors' => [],
-            'validated' => $validator->validated(),
-        ];
+        });
     }
 
-    public function validate(array $schema, array $payload): array
+    public function validate(array $schema, array $payload, ?string $locale = null): array
     {
         $fields = Arr::get($schema, 'fields', []);
 
@@ -153,95 +161,97 @@ class SubmissionValidator
 
         $rules = $this->compileRules($fields);
 
-        return Validator::make($payload, $rules)->validate();
+        return $this->withLocale($locale, static fn (): array => Validator::make($payload, $rules)->validate());
     }
 
-    public function validateFields(array $schema, array $payload, array $onlyFields = []): array
+    public function validateFields(array $schema, array $payload, array $onlyFields = [], ?string $locale = null): array
     {
-        $descriptors = $this->describeFields($schema);
-        $byName = [];
+        return $this->withLocale($locale, function () use ($schema, $payload, $onlyFields): array {
+            $descriptors = $this->describeFields($schema);
+            $byName = [];
 
-        foreach ($descriptors as $field) {
-            $byName[$field['name']] = $field;
-        }
+            foreach ($descriptors as $field) {
+                $byName[$field['name']] = $field;
+            }
 
-        $resolved = [];
-        $errors = [];
+            $resolved = [];
+            $errors = [];
 
-        if ($onlyFields === []) {
-            foreach ($payload as $key => $_value) {
-                if (! is_string($key)) {
-                    continue;
+            if ($onlyFields === []) {
+                foreach ($payload as $key => $_value) {
+                    if (! is_string($key)) {
+                        continue;
+                    }
+
+                    $field = $this->resolveField($schema, $key);
+
+                    if (is_array($field)) {
+                        $resolved[$field['name']] = $field;
+                    }
                 }
+            } else {
+                foreach ($onlyFields as $requested) {
+                    $identifier = trim((string) $requested);
 
-                $field = $this->resolveField($schema, $key);
+                    if ($identifier === '') {
+                        continue;
+                    }
 
-                if (is_array($field)) {
+                    $field = $this->resolveField($schema, $identifier);
+
+                    if (! is_array($field)) {
+                        $errors[$identifier] = [trans('formforge::validation.unknown_field_identifier')];
+                        continue;
+                    }
+
                     $resolved[$field['name']] = $field;
                 }
             }
-        } else {
-            foreach ($onlyFields as $requested) {
-                $identifier = trim((string) $requested);
 
-                if ($identifier === '') {
-                    continue;
-                }
-
-                $field = $this->resolveField($schema, $identifier);
-
-                if (! is_array($field)) {
-                    $errors[$identifier] = ['Unknown field identifier.'];
-                    continue;
-                }
-
-                $resolved[$field['name']] = $field;
+            if ($resolved === []) {
+                return [
+                    'valid' => $errors === [],
+                    'errors' => $errors,
+                    'validated' => [],
+                ];
             }
-        }
 
-        if ($resolved === []) {
+            $subsetPayload = [];
+
+            foreach ($resolved as $name => $field) {
+                foreach ($field['lookup_keys'] as $lookup) {
+                    if (array_key_exists($lookup, $payload)) {
+                        $subsetPayload[$name] = $payload[$lookup];
+                        break;
+                    }
+                }
+            }
+
+            $fieldsForValidation = [];
+            foreach (array_keys($resolved) as $name) {
+                if (isset($byName[$name])) {
+                    $fieldsForValidation[] = $byName[$name];
+                }
+            }
+
+            $subsetPayload = $this->sanitizeNullishOptionalPayload($fieldsForValidation, $subsetPayload);
+            $rules = $this->compileRules($fieldsForValidation);
+            $validator = Validator::make($subsetPayload, $rules);
+
+            if ((bool) config('formforge.validation.field.stop_on_first_failure', false)) {
+                $validator->stopOnFirstFailure();
+            }
+
+            if (! $validator->passes()) {
+                $errors = array_merge($errors, $validator->errors()->toArray());
+            }
+
             return [
                 'valid' => $errors === [],
                 'errors' => $errors,
-                'validated' => [],
+                'validated' => $errors === [] ? $validator->validated() : [],
             ];
-        }
-
-        $subsetPayload = [];
-
-        foreach ($resolved as $name => $field) {
-            foreach ($field['lookup_keys'] as $lookup) {
-                if (array_key_exists($lookup, $payload)) {
-                    $subsetPayload[$name] = $payload[$lookup];
-                    break;
-                }
-            }
-        }
-
-        $fieldsForValidation = [];
-        foreach (array_keys($resolved) as $name) {
-            if (isset($byName[$name])) {
-                $fieldsForValidation[] = $byName[$name];
-            }
-        }
-
-        $subsetPayload = $this->sanitizeNullishOptionalPayload($fieldsForValidation, $subsetPayload);
-        $rules = $this->compileRules($fieldsForValidation);
-        $validator = Validator::make($subsetPayload, $rules);
-
-        if ((bool) config('formforge.validation.field.stop_on_first_failure', false)) {
-            $validator->stopOnFirstFailure();
-        }
-
-        if (! $validator->passes()) {
-            $errors = array_merge($errors, $validator->errors()->toArray());
-        }
-
-        return [
-            'valid' => $errors === [],
-            'errors' => $errors,
-            'validated' => $errors === [] ? $validator->validated() : [],
-        ];
+        });
     }
 
     private function compileRules(array $fields): array
@@ -435,6 +445,20 @@ class SubmissionValidator
         }
 
         return $normalized;
+    }
+
+    private function withLocale(?string $locale, callable $callback): mixed
+    {
+        $translator = app('translator');
+        $previous = $translator->getLocale();
+        $resolved = $this->localeResolver->resolve($locale);
+        $translator->setLocale($resolved);
+
+        try {
+            return $callback();
+        } finally {
+            $translator->setLocale($previous);
+        }
     }
 
     private function normalizeOptions(mixed $options): array

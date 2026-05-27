@@ -10,6 +10,6 @@ class UnknownFieldsException extends FormForgeException
     {
         $list = implode(', ', $fields);
 
-        return new self("Payload contains unknown fields: {$list}.");
+        return new self(trans('formforge::validation.unknown_fields', ['fields' => $list]));
     }
 }

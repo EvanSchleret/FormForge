@@ -8,6 +8,6 @@ class ImmutableVersionException extends FormForgeException
 {
     public static function forKeyVersion(string $key, string $version): self
     {
-        return new self("Form [{$key}] version [{$version}] is immutable and cannot be changed.");
+        return new self(trans('formforge::validation.immutable_version', ['key' => $key, 'version' => $version]));
     }
 }

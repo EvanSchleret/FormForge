@@ -107,7 +107,7 @@ class FormDraftController
         $user = $request->user();
 
         if (! $user instanceof Model) {
-            throw new AuthenticationException('Unauthenticated.');
+            throw new AuthenticationException(trans('formforge::messages.unauthenticated'));
         }
 
         return $user;
@@ -164,13 +164,13 @@ class FormDraftController
         $value = $request->route($name);
 
         if (! is_scalar($value)) {
-            throw new NotFoundHttpException("Route parameter [{$name}] is required.");
+            throw new NotFoundHttpException(trans('formforge::messages.route_param_required', ['name' => $name]));
         }
 
         $resolved = trim((string) $value);
 
         if ($resolved === '') {
-            throw new NotFoundHttpException("Route parameter [{$name}] is required.");
+            throw new NotFoundHttpException(trans('formforge::messages.route_param_required', ['name' => $name]));
         }
 
         return $resolved;

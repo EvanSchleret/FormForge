@@ -108,9 +108,9 @@ class FormInstance
         );
     }
 
-    public function validateField(string $field, mixed $value): array
+    public function validateField(string $field, mixed $value, ?string $locale = null): array
     {
-        return $this->submissionService->validateField($this->schema, $field, $value);
+        return $this->submissionService->validateFieldWithLocale($this->schema, $field, $value, $locale);
     }
 
     public function describeFields(): array
@@ -123,8 +123,8 @@ class FormInstance
         return $this->submissionService->resolveField($this->schema, $identifier);
     }
 
-    public function validateFields(array $payload, array $onlyFields = []): array
+    public function validateFields(array $payload, array $onlyFields = [], ?string $locale = null): array
     {
-        return $this->submissionService->validateFields($this->schema, $payload, $onlyFields);
+        return $this->submissionService->validateFieldsWithLocale($this->schema, $payload, $onlyFields, $locale);
     }
 }

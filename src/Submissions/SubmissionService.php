@@ -97,6 +97,13 @@ class SubmissionService
         return $this->validator->validateField($effectiveSchema, $field, $value);
     }
 
+    public function validateFieldWithLocale(array $schema, string $field, mixed $value, ?string $locale = null): array
+    {
+        $effectiveSchema = FormSchemaLayout::resolve($schema, [$field => $value]);
+
+        return $this->validator->validateField($effectiveSchema, $field, $value, $locale);
+    }
+
     public function describeFields(array $schema): array
     {
         $effectiveSchema = FormSchemaLayout::resolve($schema);
@@ -116,6 +123,13 @@ class SubmissionService
         $effectiveSchema = FormSchemaLayout::resolve($schema, $payload);
 
         return $this->validator->validateFields($effectiveSchema, $payload, $onlyFields);
+    }
+
+    public function validateFieldsWithLocale(array $schema, array $payload, array $onlyFields = [], ?string $locale = null): array
+    {
+        $effectiveSchema = FormSchemaLayout::resolve($schema, $payload);
+
+        return $this->validator->validateFields($effectiveSchema, $payload, $onlyFields, $locale);
     }
 
     private function normalizePayload(array $schema, array $fields, array $validated, ?Model $submittedBy = null): array

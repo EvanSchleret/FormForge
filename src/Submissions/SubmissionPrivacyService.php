@@ -46,7 +46,7 @@ class SubmissionPrivacyService
         $formKey = trim($formKey);
 
         if ($formKey === '') {
-            throw new FormForgeException('Form key is required for form GDPR policy.');
+            throw new FormForgeException(trans('formforge::messages.privacy_form_key_required'));
         }
 
         $normalized = $this->normalizePolicyInput($input, null);
@@ -79,7 +79,7 @@ class SubmissionPrivacyService
         $submissionUuid = trim($submissionUuid);
 
         if ($formKey === '' || $submissionUuid === '') {
-            throw new FormForgeException('Form key and submission UUID are required.');
+            throw new FormForgeException(trans('formforge::messages.privacy_form_submission_required'));
         }
 
         $submission = $this->submissions->findForForm($formKey, $submissionUuid, $owner);
@@ -571,13 +571,13 @@ class SubmissionPrivacyService
         }
 
         if (! is_numeric($value)) {
-            throw new FormForgeException('GDPR [after_days] must be numeric or null.');
+            throw new FormForgeException(trans('formforge::messages.privacy_after_days_numeric'));
         }
 
         $days = (int) $value;
 
         if ($days < 0) {
-            throw new FormForgeException('GDPR [after_days] must be greater than or equal to 0.');
+            throw new FormForgeException(trans('formforge::messages.privacy_after_days_min'));
         }
 
         return $days;

@@ -21,6 +21,7 @@ use EvanSchleret\FormForge\Tests\Fixtures\Models\CustomFormSubmission;
 use EvanSchleret\FormForge\Tests\Fixtures\User;
 use EvanSchleret\FormForge\Submissions\SubmissionValidator;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
@@ -289,6 +290,61 @@ it('ignores unknown payload keys in partial validation', function (): void {
     expect($result['valid'])->toBeTrue();
     expect($result['errors'])->toBe([]);
     expect($result['validated'])->toBe(['email' => 'evan@example.com']);
+});
+
+it('translates partial validation messages to french with explicit locale', function (): void {
+    $validator = app(SubmissionValidator::class);
+    $schema = [
+        'fields' => [[
+            'name' => 'email',
+            'type' => 'email',
+            'rules' => ['required', 'email'],
+        ]],
+    ];
+
+    $result = $validator->validateFields($schema, ['email' => 'evan@example.com'], ['missing_alias'], 'fr');
+
+    expect($result['valid'])->toBeFalse();
+    expect((string) ($result['errors']['missing_alias'][0] ?? ''))->toBe('Identifiant de champ inconnu.');
+});
+
+it('uses request query locale on the fly for validation messages', function (): void {
+    $validator = app(SubmissionValidator::class);
+    $schema = [
+        'fields' => [[
+            'name' => 'email',
+            'type' => 'email',
+            'rules' => ['required', 'email'],
+        ]],
+    ];
+
+    app()->instance('request', Request::create('/fake?formforge_locale=fr', 'POST'));
+
+    $result = $validator->validateFields($schema, ['email' => 'evan@example.com'], ['missing_alias']);
+
+    expect($result['valid'])->toBeFalse();
+    expect((string) ($result['errors']['missing_alias'][0] ?? ''))->toBe('Identifiant de champ inconnu.');
+});
+
+it('uses request header locale and falls back to english for unsupported locales', function (): void {
+    $validator = app(SubmissionValidator::class);
+    $schema = [
+        'fields' => [[
+            'name' => 'email',
+            'type' => 'email',
+            'rules' => ['required', 'email'],
+        ]],
+    ];
+
+    app()->instance('request', Request::create('/fake', 'POST', [], [], [], ['HTTP_X_FORMFORGE_LOCALE' => 'fr']));
+
+    $frResult = $validator->validateFields($schema, ['email' => 'evan@example.com'], ['missing_alias']);
+    expect((string) ($frResult['errors']['missing_alias'][0] ?? ''))->toBe('Identifiant de champ inconnu.');
+
+    app()->instance('request', Request::create('/fake?formforge_locale=es', 'POST'));
+
+    $fallback = $validator->validateFields($schema, ['email' => 'evan@example.com'], ['missing_alias']);
+    expect((string) ($fallback['errors']['missing_alias'][0] ?? ''))->toBe('Unknown field identifier.');
 });
 
 it('normalizes primitive and date range values before persistence', function (): void {

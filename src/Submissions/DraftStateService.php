@@ -124,7 +124,7 @@ class DraftStateService
     private function assertDraftsEnabled(FormInstance $form): void
     {
         if (! $form->draftsEnabled()) {
-            throw new FormForgeException('Drafts are disabled for this form.');
+            throw new FormForgeException(trans('formforge::messages.drafts_disabled'));
         }
     }
 
@@ -134,7 +134,7 @@ class DraftStateService
         $ownerId = trim((string) $owner->getKey());
 
         if ($ownerType === '' || $ownerId === '') {
-            throw new FormForgeException('Unable to resolve draft owner.');
+            throw new FormForgeException(trans('formforge::messages.draft_owner_unresolved'));
         }
 
         return [$ownerType, $ownerId];

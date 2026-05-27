@@ -70,7 +70,7 @@ class FormSchemaController
             return;
         }
 
-        throw new NotFoundHttpException('Form schema not found.');
+        throw new NotFoundHttpException(trans('formforge::messages.resolve_form_schema_not_found'));
     }
 
     private function routeRequired(Request $request, string $name): string
@@ -88,13 +88,13 @@ class FormSchemaController
         $value = $request->route($name);
 
         if (! is_scalar($value)) {
-            throw new NotFoundHttpException("Route parameter [{$name}] is required.");
+            throw new NotFoundHttpException(trans('formforge::messages.route_param_required', ['name' => $name]));
         }
 
         $resolved = trim((string) $value);
 
         if ($resolved === '') {
-            throw new NotFoundHttpException("Route parameter [{$name}] is required.");
+            throw new NotFoundHttpException(trans('formforge::messages.route_param_required', ['name' => $name]));
         }
 
         return $resolved;

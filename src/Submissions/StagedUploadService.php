@@ -82,7 +82,7 @@ class StagedUploadService
         );
 
         if ($disk === '') {
-            throw new FormForgeException('Temporary upload disk cannot be empty.');
+            throw new FormForgeException(trans('formforge::messages.tmp_upload_disk_empty'));
         }
 
         $originalName = $file->getClientOriginalName();
@@ -91,7 +91,7 @@ class StagedUploadService
         $path = Storage::disk($disk)->putFileAs($directory, $file, $storedName);
 
         if (! is_string($path) || $path === '') {
-            throw new FormForgeException('Unable to store staged upload file.');
+            throw new FormForgeException(trans('formforge::messages.staged_upload_store_failed'));
         }
 
         $size = (int) ($file->getSize() ?? 0);
@@ -144,7 +144,7 @@ class StagedUploadService
         $candidate = trim($token);
 
         if ($candidate === '') {
-            throw new FormForgeException('Upload token cannot be empty.');
+            throw new FormForgeException(trans('formforge::messages.upload_token_empty'));
         }
 
         $upload = ModelClassResolver::stagedUpload()::query()
@@ -154,7 +154,7 @@ class StagedUploadService
             ->first();
 
         if (! $upload instanceof StagedUpload) {
-            throw new FormForgeException('Upload token is invalid, expired, or already consumed.');
+            throw new FormForgeException(trans('formforge::messages.upload_token_invalid'));
         }
 
         $this->assertTokenMatchesFormField($upload, $form, $field);
@@ -197,7 +197,7 @@ class StagedUploadService
     private function assertFileField(array $field): void
     {
         if ((string) ($field['type'] ?? '') !== 'file') {
-            throw new FormForgeException('Only file fields can stage uploads.');
+            throw new FormForgeException(trans('formforge::messages.staged_only_file_fields'));
         }
     }
 
@@ -258,7 +258,7 @@ class StagedUploadService
         }
 
         if (! $accepted) {
-            throw new FormForgeException('Staged upload does not match accepted file types.');
+            throw new FormForgeException(trans('formforge::messages.staged_upload_accepted_types_mismatch'));
         }
     }
 
@@ -269,11 +269,11 @@ class StagedUploadService
         $fieldKey = (string) ($field['field_key'] ?? $field['name'] ?? '');
 
         if ((string) $upload->form_key !== $formKey || (string) $upload->form_version !== $formVersion) {
-            throw new FormForgeException('Upload token does not match the targeted form version.');
+            throw new FormForgeException(trans('formforge::messages.upload_token_form_version_mismatch'));
         }
 
         if ((string) $upload->field_key !== $fieldKey) {
-            throw new FormForgeException('Upload token does not match the targeted file field.');
+            throw new FormForgeException(trans('formforge::messages.upload_token_field_mismatch'));
         }
     }
 
@@ -296,7 +296,7 @@ class StagedUploadService
         $submittedById = (string) ($submittedBy?->getKey() ?? '');
 
         if ($submittedByType !== $uploadedByType || $submittedById !== $uploadedById) {
-            throw new FormForgeException('Upload token ownership mismatch.');
+            throw new FormForgeException(trans('formforge::messages.upload_token_ownership_mismatch'));
         }
     }
 

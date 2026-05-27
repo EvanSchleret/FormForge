@@ -57,7 +57,7 @@ class FormResolveController
     private function resolve(Request $request, FormManager $forms, string $key, ?string $version): JsonResponse
     {
         if (! $this->isResolveEnabled()) {
-            throw new NotFoundHttpException('Form schema not found.');
+            throw new NotFoundHttpException(trans('formforge::messages.resolve_form_schema_not_found'));
         }
 
         $form = $request->attributes->get('formforge.form');
@@ -89,7 +89,7 @@ class FormResolveController
 
         if ($field === '') {
             throw ValidationException::withMessages([
-                'field' => ['The field field is required.'],
+                'field' => [trans('formforge::messages.field_required')],
             ]);
         }
 
@@ -137,13 +137,13 @@ class FormResolveController
         $value = $request->route($name);
 
         if (! is_scalar($value)) {
-            throw new NotFoundHttpException("Route parameter [{$name}] is required.");
+            throw new NotFoundHttpException(trans('formforge::messages.route_param_required', ['name' => $name]));
         }
 
         $resolved = trim((string) $value);
 
         if ($resolved === '') {
-            throw new NotFoundHttpException("Route parameter [{$name}] is required.");
+            throw new NotFoundHttpException(trans('formforge::messages.route_param_required', ['name' => $name]));
         }
 
         return $resolved;

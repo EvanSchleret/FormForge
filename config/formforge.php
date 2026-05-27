@@ -164,6 +164,12 @@ return [
 
     'validation' => [
         'reject_unknown_fields' => true,
+        'locale' => env('FORMFORGE_VALIDATION_LOCALE', 'en'),
+        'fallback_locale' => env('FORMFORGE_VALIDATION_FALLBACK_LOCALE', 'en'),
+        'supported_locales' => ['en', 'fr'],
+        'allow_request_locale' => true,
+        'locale_query_param' => 'formforge_locale',
+        'locale_header' => 'X-FormForge-Locale',
         'field' => [
             'stop_on_first_failure' => false,
         ],

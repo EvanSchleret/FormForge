@@ -124,7 +124,7 @@ class UploadManager
             }
 
             if (! is_array($value)) {
-                throw new FormForgeException('Expected an array of uploaded files for a multiple file field.');
+                throw new FormForgeException(trans('formforge::messages.upload_expected_file_array'));
             }
 
             $files = [];
@@ -142,7 +142,7 @@ class UploadManager
             return [$value];
         }
 
-        throw new FormForgeException('Expected an uploaded file instance for a file field.');
+        throw new FormForgeException(trans('formforge::messages.upload_expected_file_instance'));
     }
 
     private function normalizeMetadataInput(mixed $value, bool $multiple): array
@@ -153,7 +153,7 @@ class UploadManager
 
         if ($multiple) {
             if (! is_array($value)) {
-                throw new FormForgeException('Expected an array of file metadata for a multiple file field.');
+                throw new FormForgeException(trans('formforge::messages.upload_expected_metadata_array'));
             }
 
             $items = [];
@@ -168,7 +168,7 @@ class UploadManager
         }
 
         if (! is_array($value)) {
-            throw new FormForgeException('Expected file metadata for a file field.');
+            throw new FormForgeException(trans('formforge::messages.upload_expected_metadata'));
         }
 
         return [$value];
@@ -194,7 +194,7 @@ class UploadManager
         $path = Storage::disk($disk)->putFileAs($directory, $file, $storedName, $options);
 
         if (! is_string($path) || $path === '') {
-            throw new FormForgeException('Unable to store uploaded file.');
+            throw new FormForgeException(trans('formforge::messages.upload_store_failed'));
         }
 
         $size = (int) ($file->getSize() ?? 0);
@@ -224,7 +224,7 @@ class UploadManager
         $path = trim((string) Arr::get($item, 'path', ''));
 
         if ($path === '') {
-            throw new FormForgeException('File metadata path is required.');
+            throw new FormForgeException(trans('formforge::messages.upload_metadata_path_required'));
         }
 
         if (! Storage::disk($disk)->exists($path)) {
@@ -272,7 +272,7 @@ class UploadManager
         $sourcePath = trim((string) Arr::get($item, 'path', ''));
 
         if ($sourcePath === '') {
-            throw new FormForgeException('Staged file path is required.');
+            throw new FormForgeException(trans('formforge::messages.staged_file_path_required'));
         }
 
         if (! Storage::disk($sourceDisk)->exists($sourcePath)) {
@@ -294,7 +294,7 @@ class UploadManager
             $moved = Storage::disk($sourceDisk)->move($sourcePath, $targetPath);
 
             if (! $moved) {
-                throw new FormForgeException('Unable to move staged file to final destination.');
+                throw new FormForgeException(trans('formforge::messages.staged_file_move_failed'));
             }
 
             if ($visibility !== null) {
@@ -304,7 +304,7 @@ class UploadManager
             $stream = Storage::disk($sourceDisk)->readStream($sourcePath);
 
             if ($stream === false) {
-                throw new FormForgeException('Unable to read staged file stream.');
+                throw new FormForgeException(trans('formforge::messages.staged_file_stream_read_failed'));
             }
 
             $options = [];
@@ -320,7 +320,7 @@ class UploadManager
             }
 
             if (! $written) {
-                throw new FormForgeException('Unable to write staged file to final destination.');
+                throw new FormForgeException(trans('formforge::messages.staged_file_write_failed'));
             }
 
             Storage::disk($sourceDisk)->delete($sourcePath);
@@ -365,7 +365,7 @@ class UploadManager
         $visibility = trim((string) ($storage['visibility'] ?? config('formforge.uploads.visibility', 'private')));
 
         if ($disk === '') {
-            throw new FormForgeException('Upload disk cannot be empty.');
+            throw new FormForgeException(trans('formforge::messages.upload_disk_empty'));
         }
 
         return [
