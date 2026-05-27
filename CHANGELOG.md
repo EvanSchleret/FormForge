@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog.
 
+## v1.4.0 - 2026-05-27
+
+### v1.4.0
+
+#### Added
+
+- Runtime locale resolution for backend validation flows:
+  - explicit method locale
+  - query param (`formforge_locale`)
+  - header (`X-FormForge-Locale`)
+  - config/app locale fallback chain
+  
+- EN/FR translation resources for FormForge backend messages.
+- Publishable package language files via `formforge-lang`.
+
+#### Changed
+
+- Validation and field-level backend responses now use translatable message keys while preserving canonical technical keys.
+- Partial validation flows continue to return canonical field keys; only message text is localized.
+- Backend docs reorganized with a dedicated Validation section.
+
+#### Notes
+
+- Laravel native rule messages are still resolved by host app translation files.
+
+**Full Changelog**: https://github.com/EvanSchleret/FormForge/compare/v1.3.0...v1.4.0
+
 ## v1.3.0 - 2026-05-26
 
 ### v1.3.0
@@ -11,12 +38,15 @@ The format is based on Keep a Changelog.
 #### Added
 
 - New normalized field descriptor API for FormForge schemas:
+  
   - `describeFields()` on `FormInstance`, `FormManager`, `ScopedFormManager`
   
 - New centralized field resolution API:
+  
   - `resolveField(...)` matching `name`, `field_key`, `key`, `id`
   
 - New partial batch validation API:
+  
   - `validateFields(...)` for subset-oriented field validation
   - Supports alias identifiers in `onlyFields`
   - Returns errors keyed by canonical field `name`
@@ -30,10 +60,12 @@ The format is based on Keep a Changelog.
 #### Behavior notes
 
 - Existing APIs remain intact:
+  
   - `validate(...)` unchanged (including unknown-field handling)
   - `validateField(...)` signature and response shape unchanged
   
 - Partial validation (`validateFields`) is field-oriented:
+  
   - Unknown payload keys are ignored
   - No global unknown-fields rejection in this flow
   
@@ -178,11 +210,13 @@ php artisan formforge:install:merge --skip-migrations --no-backup
 
 
 
+
 ```
 #### DB Migration
 
 ```bash
 php artisan migrate
+
 
 
 
