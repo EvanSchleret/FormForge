@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog.
 
+## v1.5.1 - 2026-05-28
+
+### v1.5.1
+
+#### Fixed
+
+- Added support for filtering form query routes by linked category slug using `field: "category_slug"`.
+- Resolved mismatch where `category` filtering targeted stored category reference (key) and could not match category slug values.
+
+#### Added
+
+- New `category_slug` field support in `http.query_routes.forms.where` predicates.
+- Feature test coverage for form query route filtering by category slug.
+
+#### Documentation
+
+- Updated Query Routes docs to clarify:
+  - `category` filters by stored category reference/key
+  - `category_slug` filters by related category slug
+  
+
+**Full Changelog**: https://github.com/EvanSchleret/FormForge/compare/v1.5.0...v1.5.1
+
 ## v1.5.0 - 2026-05-28
 
 ### v1.5.0
@@ -11,16 +34,21 @@ The format is based on Keep a Changelog.
 #### Added
 
 - Introduced `http.query_routes` configuration for reusable, named query routes.
+  
 - Added new management endpoints:
+  
   - `GET /form-routes/{routeKey}`
   - `GET /category-routes/{routeKey}`
   
 - Enabled scoped and non-scoped support for query routes.
+  
 - Added nested predicate DSL with logical groups:
+  
   - `all` (AND)
   - `any` (OR)
   
 - Added rich operators:
+  
   - `eq`, `neq`, `gt`, `gte`, `lt`, `lte`
   - `in`, `not_in`
   - `contains`, `starts_with`, `ends_with`
@@ -28,6 +56,7 @@ The format is based on Keep a Changelog.
   - `between`
   
 - Added aggregate filtering support:
+  
   - `responses_count` for form routes
   - `forms_count` for category routes
   
@@ -257,11 +286,13 @@ php artisan formforge:install:merge --skip-migrations --no-backup
 
 
 
+
 ```
 #### DB Migration
 
 ```bash
 php artisan migrate
+
 
 
 
