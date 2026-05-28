@@ -4,6 +4,48 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog.
 
+## v1.5.0 - 2026-05-28
+
+### v1.5.0
+
+#### Added
+
+- Introduced `http.query_routes` configuration for reusable, named query routes.
+- Added new management endpoints:
+  - `GET /form-routes/{routeKey}`
+  - `GET /category-routes/{routeKey}`
+  
+- Enabled scoped and non-scoped support for query routes.
+- Added nested predicate DSL with logical groups:
+  - `all` (AND)
+  - `any` (OR)
+  
+- Added rich operators:
+  - `eq`, `neq`, `gt`, `gte`, `lt`, `lte`
+  - `in`, `not_in`
+  - `contains`, `starts_with`, `ends_with`
+  - `is_null`, `not_null`
+  - `between`
+  
+- Added aggregate filtering support:
+  - `responses_count` for form routes
+  - `forms_count` for category routes
+  
+
+#### Changed
+
+- HTTP route listing command now includes query route endpoints.
+- Authorization action map and base policy now include:
+  - `management.form_route`
+  - `management.category_route`
+  
+
+#### Tests
+
+- Added feature coverage for form route resolution and category route resolution.
+
+**Full Changelog**: https://github.com/EvanSchleret/FormForge/compare/v1.4.0...v1.5.0
+
 ## v1.4.0 - 2026-05-27
 
 ### v1.4.0
@@ -11,13 +53,16 @@ The format is based on Keep a Changelog.
 #### Added
 
 - Runtime locale resolution for backend validation flows:
+  
   - explicit method locale
   - query param (`formforge_locale`)
   - header (`X-FormForge-Locale`)
   - config/app locale fallback chain
   
 - EN/FR translation resources for FormForge backend messages.
+  
 - Publishable package language files via `formforge-lang`.
+  
 
 #### Changed
 
@@ -211,11 +256,13 @@ php artisan formforge:install:merge --skip-migrations --no-backup
 
 
 
+
 ```
 #### DB Migration
 
 ```bash
 php artisan migrate
+
 
 
 
