@@ -1016,6 +1016,10 @@ class FormManagementController
             $this->applyQueryRouteAggregateNode($query, $resource, $field, $op, $value, $boolean);
             return;
         }
+        if ($resource === 'forms' && $field === 'category_slug') {
+            $this->applyQueryRouteCategorySlugNode($query, $op, $value, $boolean);
+            return;
+        }
         $column = $this->queryRouteColumn($resource, $field);
         $method = $boolean === 'or' ? 'orWhere' : 'where';
         if ($column === null) {
@@ -1080,5 +1084,44 @@ class FormManagementController
             return $field;
         }
         return null;
+    }
+
+    private function applyQueryRouteCategorySlugNode(Builder $query, string $op, mixed $value, string $boolean): void
+    {
+        $method = $boolean === 'or' ? 'orWhereHas' : 'whereHas';
+        $notMethod = $boolean === 'or' ? 'orWhereDoesntHave' : 'whereDoesntHave';
+
+        match ($op) {
+            'eq' => $query->{$method}('categoryModel', static function (Builder $builder) use ($value): void {
+                $builder->where('slug', '=', (string) $value);
+            }),
+            'neq' => $query->{$notMethod}('categoryModel', static function (Builder $builder) use ($value): void {
+                $builder->where('slug', '=', (string) $value);
+            }),
+            'in' => is_array($value) ? $query->{$method}('categoryModel', static function (Builder $builder) use ($value): void {
+                $builder->whereIn('slug', $value);
+            }) : null,
+            'not_in' => is_array($value) ? $query->{$notMethod}('categoryModel', static function (Builder $builder) use ($value): void {
+                $builder->whereIn('slug', $value);
+            }) : null,
+            'contains' => $query->{$method}('categoryModel', static function (Builder $builder) use ($value): void {
+                $builder->where('slug', 'like', '%' . (string) $value . '%');
+            }),
+            'starts_with' => $query->{$method}('categoryModel', static function (Builder $builder) use ($value): void {
+                $builder->where('slug', 'like', (string) $value . '%');
+            }),
+            'ends_with' => $query->{$method}('categoryModel', static function (Builder $builder) use ($value): void {
+                $builder->where('slug', 'like', '%' . (string) $value);
+            }),
+            'is_null' => $query->{$notMethod}('categoryModel', static function (Builder $builder): void {
+                $builder->whereNotNull('slug');
+            }),
+            'not_null' => $query->{$method}('categoryModel', static function (Builder $builder): void {
+                $builder->whereNotNull('slug');
+            }),
+            default => throw ValidationException::withMessages([
+                'route' => ["Unsupported operator [{$op}] for field [category_slug]."],
+            ]),
+        };
     }
 }

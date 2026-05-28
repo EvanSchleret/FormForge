@@ -1838,3 +1838,54 @@ it('resolves configured category route', function (): void {
         ->assertJsonPath('meta.route_key', 'active_non_system')
         ->assertJsonFragment(['key' => 'cat_a']);
 });
+
+it('filters form route by category slug', function (): void {
+    config()->set('formforge.http.query_routes.forms', [
+        'without_membership_slug' => [
+            'where' => [
+                'all' => [
+                    ['field' => 'category_slug', 'op' => 'neq', 'value' => 'membership'],
+                ],
+            ],
+        ],
+    ]);
+
+    FormCategory::query()->create([
+        'key' => 'cat_membership',
+        'slug' => 'membership',
+        'name' => 'Membership',
+        'is_active' => true,
+        'is_system' => false,
+    ]);
+    FormCategory::query()->create([
+        'key' => 'cat_general',
+        'slug' => 'general',
+        'name' => 'General',
+        'is_active' => true,
+        'is_system' => false,
+    ]);
+
+    app(FormMutationService::class)->create([
+        'key' => 'form_membership_' . Str::lower(Str::random(6)),
+        'title' => 'Membership Form',
+        'fields' => [['type' => 'text', 'name' => 'name', 'required' => true]],
+        'pages' => [],
+        'conditions' => [],
+        'category' => 'cat_membership',
+    ]);
+
+    app(FormMutationService::class)->create([
+        'key' => 'form_general_' . Str::lower(Str::random(6)),
+        'title' => 'General Form',
+        'fields' => [['type' => 'text', 'name' => 'name', 'required' => true]],
+        'pages' => [],
+        'conditions' => [],
+        'category' => 'cat_general',
+    ]);
+
+    $this->getJson('/api/formforge/v1/form-routes/without_membership_slug')
+        ->assertOk()
+        ->assertJsonPath('meta.route_key', 'without_membership_slug')
+        ->assertJsonMissing(['title' => 'Membership Form'])
+        ->assertJsonFragment(['title' => 'General Form']);
+});
