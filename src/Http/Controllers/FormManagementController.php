@@ -12,6 +12,7 @@ use EvanSchleret\FormForge\Management\FormCategoryService;
 use EvanSchleret\FormForge\Management\FormMutationService;
 use EvanSchleret\FormForge\Management\IdempotencyService;
 use EvanSchleret\FormForge\Models\FormDefinition;
+use EvanSchleret\FormForge\Support\ModelClassResolver;
 use EvanSchleret\FormForge\Ownership\OwnershipReference;
 use EvanSchleret\FormForge\Persistence\FormDefinitionRepository;
 use EvanSchleret\FormForge\Submissions\SubmissionReadService;
@@ -20,6 +21,7 @@ use EvanSchleret\FormForge\Submissions\SubmissionPrivacyService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
@@ -462,6 +464,92 @@ class FormManagementController
         ]);
     }
 
+    public function formRoute(
+        Request $request,
+        FormMutationService $mutations,
+    ): JsonResponse {
+        $routeKey = $this->routeRequired($request, 'routeKey');
+        $owner = $this->resolvedOwner($request, 'form_route');
+        $perPage = $this->boundedInt($request->query('per_page', 15), 1, 100, 15);
+
+        $configured = config('formforge.http.query_routes.forms', []);
+        $definition = is_array($configured) ? ($configured[$routeKey] ?? null) : null;
+
+        if (! is_array($definition)) {
+            throw new NotFoundHttpException("Form route [{$routeKey}] not found.");
+        }
+
+        $query = $mutations->queryActive([], $owner);
+        $this->applyQueryRouteWhere($query, $definition['where'] ?? null, 'forms');
+
+        $paginator = $query->paginate($perPage);
+        $paginator->appends($request->query());
+
+        return response()->json([
+            'data' => [
+                'data' => $this->serializeFormDefinitionCollection($request, $mutations, $paginator->items()),
+            ],
+            'meta' => [
+                'route_key' => $routeKey,
+                'current_page' => $paginator->currentPage(),
+                'from' => $paginator->firstItem(),
+                'last_page' => $paginator->lastPage(),
+                'path' => $paginator->path(),
+                'per_page' => $paginator->perPage(),
+                'to' => $paginator->lastItem(),
+                'total' => $paginator->total(),
+            ],
+            'links' => [
+                'first' => $paginator->url(1),
+                'last' => $paginator->url($paginator->lastPage()),
+                'prev' => $paginator->previousPageUrl(),
+                'next' => $paginator->nextPageUrl(),
+            ],
+        ]);
+    }
+
+    public function categoryRoute(
+        Request $request,
+        FormCategoryService $categories,
+    ): JsonResponse {
+        $routeKey = $this->routeRequired($request, 'routeKey');
+        $owner = $this->resolvedOwner($request, 'category_route');
+        $perPage = $this->boundedInt($request->query('per_page', 15), 1, 100, 15);
+        $configured = config('formforge.http.query_routes.categories', []);
+        $definition = is_array($configured) ? ($configured[$routeKey] ?? null) : null;
+
+        if (! is_array($definition)) {
+            throw new NotFoundHttpException("Category route [{$routeKey}] not found.");
+        }
+
+        $query = ModelClassResolver::formCategory()::query()->orderBy('key');
+        app(\EvanSchleret\FormForge\Ownership\OwnershipManager::class)->applyScope($query, $owner);
+        $this->applyQueryRouteWhere($query, $definition['where'] ?? null, 'categories');
+        $paginator = $query->paginate($perPage);
+        $paginator->appends($request->query());
+        $rows = $paginator->getCollection()->map(fn ($category): array => $categories->toArray($category))->values()->all();
+
+        return response()->json([
+            'data' => ['data' => $rows],
+            'meta' => [
+                'route_key' => $routeKey,
+                'current_page' => $paginator->currentPage(),
+                'from' => $paginator->firstItem(),
+                'last_page' => $paginator->lastPage(),
+                'path' => $paginator->path(),
+                'per_page' => $paginator->perPage(),
+                'to' => $paginator->lastItem(),
+                'total' => $paginator->total(),
+            ],
+            'links' => [
+                'first' => $paginator->url(1),
+                'last' => $paginator->url($paginator->lastPage()),
+                'prev' => $paginator->previousPageUrl(),
+                'next' => $paginator->nextPageUrl(),
+            ],
+        ]);
+    }
+
     public function create(Request $request, FormMutationService $mutations, IdempotencyService $idempotency): JsonResponse
     {
         $owner = $this->resolvedOwner($request, 'create');
@@ -882,5 +970,115 @@ class FormManagementController
         $this->authorizeAction($request, $action, $owner);
 
         return $owner;
+    }
+
+    private function applyQueryRouteWhere(Builder $query, mixed $where, string $resource): void
+    {
+        if (! is_array($where)) {
+            return;
+        }
+        if (array_key_exists('all', $where) && is_array($where['all'])) {
+            $query->where(function (Builder $builder) use ($where, $resource): void {
+                foreach ($where['all'] as $node) {
+                    $this->applyQueryRouteNode($builder, $node, $resource, 'and');
+                }
+            });
+            return;
+        }
+        if (array_key_exists('any', $where) && is_array($where['any'])) {
+            $query->where(function (Builder $builder) use ($where, $resource): void {
+                foreach ($where['any'] as $node) {
+                    $this->applyQueryRouteNode($builder, $node, $resource, 'or');
+                }
+            });
+        }
+    }
+
+    private function applyQueryRouteNode(Builder $query, mixed $node, string $resource, string $boolean): void
+    {
+        if (! is_array($node)) {
+            return;
+        }
+        if (array_key_exists('all', $node) || array_key_exists('any', $node)) {
+            $method = $boolean === 'or' ? 'orWhere' : 'where';
+            $query->{$method}(function (Builder $builder) use ($node, $resource): void {
+                $this->applyQueryRouteWhere($builder, $node, $resource);
+            });
+            return;
+        }
+        $field = is_string($node['field'] ?? null) ? trim((string) $node['field']) : '';
+        $op = is_string($node['op'] ?? null) ? trim((string) $node['op']) : '';
+        $value = $node['value'] ?? null;
+        if ($field === '' || $op === '') {
+            return;
+        }
+        if ($field === 'responses_count' || $field === 'forms_count') {
+            $this->applyQueryRouteAggregateNode($query, $resource, $field, $op, $value, $boolean);
+            return;
+        }
+        $column = $this->queryRouteColumn($resource, $field);
+        $method = $boolean === 'or' ? 'orWhere' : 'where';
+        if ($column === null) {
+            throw ValidationException::withMessages([
+                'route' => ["Unsupported field [{$field}] for resource [{$resource}]."],
+            ]);
+        }
+        match ($op) {
+            'eq' => $query->{$method}($column, '=', $value),
+            'neq' => $query->{$method}($column, '!=', $value),
+            'gt' => $query->{$method}($column, '>', $value),
+            'gte' => $query->{$method}($column, '>=', $value),
+            'lt' => $query->{$method}($column, '<', $value),
+            'lte' => $query->{$method}($column, '<=', $value),
+            'contains' => $query->{$method}($column, 'like', '%' . (string) $value . '%'),
+            'starts_with' => $query->{$method}($column, 'like', (string) $value . '%'),
+            'ends_with' => $query->{$method}($column, 'like', '%' . (string) $value),
+            'is_null' => $boolean === 'or' ? $query->orWhereNull($column) : $query->whereNull($column),
+            'not_null' => $boolean === 'or' ? $query->orWhereNotNull($column) : $query->whereNotNull($column),
+            'in' => is_array($value) ? ($boolean === 'or' ? $query->orWhereIn($column, $value) : $query->whereIn($column, $value)) : null,
+            'not_in' => is_array($value) ? ($boolean === 'or' ? $query->orWhereNotIn($column, $value) : $query->whereNotIn($column, $value)) : null,
+            'between' => is_array($value) && count($value) === 2 ? ($boolean === 'or' ? $query->orWhereBetween($column, [$value[0], $value[1]]) : $query->whereBetween($column, [$value[0], $value[1]])) : null,
+            default => throw ValidationException::withMessages([
+                'route' => ["Unsupported operator [{$op}] for field [{$field}]."],
+            ]),
+        };
+    }
+
+    private function applyQueryRouteAggregateNode(Builder $query, string $resource, string $field, string $op, mixed $value, string $boolean): void
+    {
+        $formTable = ModelClassResolver::formDefinition()::query()->getModel()->getTable();
+        $submissionTable = ModelClassResolver::formSubmission()::query()->getModel()->getTable();
+        $categoryTable = ModelClassResolver::formCategory()::query()->getModel()->getTable();
+        $operators = ['eq' => '=', 'neq' => '!=', 'gt' => '>', 'gte' => '>=', 'lt' => '<', 'lte' => '<='];
+
+        if (! array_key_exists($op, $operators) || ! is_numeric($value)) {
+            throw ValidationException::withMessages([
+                'route' => ["Invalid aggregate condition [{$field} {$op}]."],
+            ]);
+        }
+
+        $sql = $field === 'responses_count' && $resource === 'forms'
+            ? "(select count(*) from {$submissionTable} where form_key = {$formTable}.key) {$operators[$op]} ?"
+            : "(select count(*) from {$formTable} where form_category_id = {$categoryTable}.id and deleted_at is null) {$operators[$op]} ?";
+
+        if ($boolean === 'or') {
+            $query->orWhereRaw($sql, [(int) $value]);
+            return;
+        }
+
+        $query->whereRaw($sql, [(int) $value]);
+    }
+
+    private function queryRouteColumn(string $resource, string $field): ?string
+    {
+        $forms = ['key', 'title', 'category', 'is_published', 'created_at', 'updated_at', 'owner_type', 'owner_id'];
+        $categories = ['key', 'slug', 'name', 'is_active', 'is_system', 'created_at', 'updated_at', 'owner_type', 'owner_id'];
+        if ($resource === 'forms' && in_array($field, $forms, true)) {
+            return $field;
+        }
+        if ($resource === 'categories' && in_array($field, $categories, true)) {
+            return $field;
+        }
+        return null;
     }
 }

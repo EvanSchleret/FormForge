@@ -70,6 +70,8 @@ class HttpRoutesCommand extends Command
 
         if ($isEnabled('management')) {
             $rows[] = ['GET', '/' . $prefix . '/forms', 'management(index)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])];
+            $rows[] = ['GET', '/' . $prefix . '/form-routes/{routeKey}', 'management(form_route)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])];
+            $rows[] = ['GET', '/' . $prefix . '/category-routes/{routeKey}', 'management(category_route)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])];
             $rows[] = ['GET', '/' . $prefix . '/categories', 'management(categories)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])];
             $rows[] = ['GET', '/' . $prefix . '/categories/{categoryKey}', 'management(category)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])];
             $rows[] = ['POST', '/' . $prefix . '/categories', 'management(category_create)', $management['auth'], $management['guard'] ?? '-', implode(', ', $management['middleware'] ?? [])];

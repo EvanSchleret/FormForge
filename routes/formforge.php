@@ -109,6 +109,8 @@ $registerRoutes = static function (?string $scopeName, callable $isEndpointEnabl
 
     if ($isEndpointEnabled('management')) {
         Route::middleware($routeMiddleware('management', 'index', $scopeName))->get('/forms', [$managementController, 'index']);
+        Route::middleware($routeMiddleware('management', 'form_route', $scopeName))->get('/form-routes/{routeKey}', [$managementController, 'formRoute']);
+        Route::middleware($routeMiddleware('management', 'category_route', $scopeName))->get('/category-routes/{routeKey}', [$managementController, 'categoryRoute']);
         Route::middleware($routeMiddleware('management', 'categories', $scopeName))->get('/categories', [$managementController, 'categories']);
         Route::middleware($routeMiddleware('management', 'category', $scopeName))->get('/categories/{categoryKey}', [$managementController, 'category']);
         Route::middleware($routeMiddleware('management', 'category_create', $scopeName))->post('/categories', [$managementController, 'createCategory']);

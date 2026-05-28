@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use EvanSchleret\FormForge\Facades\Form;
 use EvanSchleret\FormForge\Http\Authorization\FormForgeAuthorizationContext;
+use EvanSchleret\FormForge\Management\FormMutationService;
 use EvanSchleret\FormForge\Models\FormCategory;
 use EvanSchleret\FormForge\Ownership\NullOwnershipResolver;
 use EvanSchleret\FormForge\Tests\Fixtures\Controllers\CustomFormManagementController;
@@ -1743,4 +1744,97 @@ it('rejects test submissions outside configured environments', function (): void
     ])
         ->assertStatus(422)
         ->assertJsonValidationErrors('test');
+});
+
+it('resolves configured form route excluding categories', function (): void {
+    config()->set('formforge.http.query_routes.forms', [
+        'no_x' => [
+            'where' => [
+                'all' => [
+                    ['field' => 'category', 'op' => 'not_in', 'value' => ['x']],
+                ],
+            ],
+        ],
+    ]);
+
+    FormCategory::query()->create([
+        'key' => 'x',
+        'slug' => 'x',
+        'name' => 'X',
+        'is_active' => true,
+        'is_system' => false,
+    ]);
+    FormCategory::query()->create([
+        'key' => 'y',
+        'slug' => 'y',
+        'name' => 'Y',
+        'is_active' => true,
+        'is_system' => false,
+    ]);
+
+    app(FormMutationService::class)->create([
+        'key' => 'form_keep_' . Str::lower(Str::random(6)),
+        'title' => 'Keep',
+        'fields' => [['type' => 'text', 'name' => 'name', 'required' => true]],
+        'pages' => [],
+        'conditions' => [],
+        'category' => 'y',
+    ]);
+
+    $response = $this->getJson('/api/formforge/v1/form-routes/no_x')
+        ->assertOk();
+
+    $response->assertJsonPath('meta.route_key', 'no_x');
+});
+
+it('resolves configured form route with created_before or min responses', function (): void {
+    config()->set('formforge.http.query_routes.forms', [
+        'legacy_or_busy' => [
+            'where' => [
+                'any' => [
+                    ['field' => 'created_at', 'op' => 'lt', 'value' => '2100-01-01T00:00:00Z'],
+                    ['field' => 'responses_count', 'op' => 'gt', 'value' => 0],
+                ],
+            ],
+        ],
+    ]);
+
+    app(FormMutationService::class)->create([
+        'key' => 'form_or_' . Str::lower(Str::random(6)),
+        'title' => 'Or',
+        'fields' => [['type' => 'text', 'name' => 'name', 'required' => true]],
+        'pages' => [],
+        'conditions' => [],
+    ]);
+
+    $this->getJson('/api/formforge/v1/form-routes/legacy_or_busy')
+        ->assertOk()
+        ->assertJsonPath('meta.route_key', 'legacy_or_busy')
+        ->assertJsonFragment(['title' => 'Or']);
+});
+
+it('resolves configured category route', function (): void {
+    config()->set('formforge.http.query_routes.categories', [
+        'active_non_system' => [
+            'where' => [
+                'all' => [
+                    ['field' => 'is_active', 'op' => 'eq', 'value' => true],
+                    ['field' => 'is_system', 'op' => 'eq', 'value' => false],
+                ],
+            ],
+        ],
+    ]);
+
+    FormCategory::query()->create([
+        'key' => 'cat_a',
+        'slug' => 'cat-a',
+        'name' => 'Cat A',
+        'is_active' => true,
+        'is_system' => false,
+    ]);
+
+    $this->getJson('/api/formforge/v1/category-routes/active_non_system')
+        ->assertOk()
+        ->assertJsonPath('meta.route_key', 'active_non_system')
+        ->assertJsonFragment(['key' => 'cat_a']);
 });

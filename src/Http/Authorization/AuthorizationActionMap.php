@@ -24,6 +24,8 @@ class AuthorizationActionMap
             'draft.current' => 'draft_current',
             'draft.delete' => 'draft_delete',
             'management.index' => 'management_index',
+            'management.form_route' => 'management_form_route',
+            'management.category_route' => 'management_category_route',
             'management.categories' => 'management_categories',
             'management.category' => 'management_category',
             'management.category_create' => 'management_category_create',

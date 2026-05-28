@@ -86,6 +86,16 @@ class BaseFormForgePolicy
         return false;
     }
 
+    public function management_form_route(mixed $user, FormForgeAuthorizationContext $context): bool
+    {
+        return false;
+    }
+
+    public function management_category_route(mixed $user, FormForgeAuthorizationContext $context): bool
+    {
+        return false;
+    }
+
     public function management_categories(mixed $user, FormForgeAuthorizationContext $context): bool
     {
         return false;

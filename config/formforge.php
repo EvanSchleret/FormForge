@@ -248,6 +248,10 @@ return [
             'draft' => true,
             'management' => true,
         ],
+        'query_routes' => [
+            'forms' => [],
+            'categories' => [],
+        ],
         'scoped_routes' => [
             /*
             [
