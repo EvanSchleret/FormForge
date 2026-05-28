@@ -163,6 +163,7 @@ return [
     */
 
     'validation' => [
+        'input_key_mode' => env('FORMFORGE_INPUT_KEY_MODE', 'both'), // name_only|field_key_only|both
         'reject_unknown_fields' => true,
         'locale' => env('FORMFORGE_VALIDATION_LOCALE', 'en'),
         'fallback_locale' => env('FORMFORGE_VALIDATION_FALLBACK_LOCALE', 'en'),

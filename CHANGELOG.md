@@ -66,6 +66,13 @@ The format is based on Keep a Changelog.
 
 **Full Changelog**: https://github.com/EvanSchleret/FormForge/compare/v1.5.0...v1.5.1
 
+## Unreleased
+
+- Submission/validation payloads now accept `name` and `field_key` input keys (default `formforge.validation.input_key_mode=both`).
+- Input key resolution now prefers exact `name`, then exact `field_key`.
+- If the same target field receives multiple non-name aliases in one payload, an explicit conflict error is raised.
+- Unknown fields handling remains unchanged (`reject_unknown_fields` still applies).
+
 ## v1.5.0 - 2026-05-28
 
 ### v1.5.0

@@ -124,6 +124,7 @@ class SubmissionValidator
 
     public function validate(array $schema, array $payload, ?string $locale = null): array
     {
+        $payload = $this->normalizeInputPayload($schema, $payload);
         $fields = Arr::get($schema, 'fields', []);
 
         if (! is_array($fields)) {
@@ -166,6 +167,8 @@ class SubmissionValidator
 
     public function validateFields(array $schema, array $payload, array $onlyFields = [], ?string $locale = null): array
     {
+        $payload = $this->normalizeInputPayload($schema, $payload);
+
         return $this->withLocale($locale, function () use ($schema, $payload, $onlyFields): array {
             $descriptors = $this->describeFields($schema);
             $byName = [];
@@ -252,6 +255,111 @@ class SubmissionValidator
                 'validated' => $errors === [] ? $validator->validated() : [],
             ];
         });
+    }
+
+    public function normalizeInputPayload(array $schema, array $payload): array
+    {
+        $mode = (string) config('formforge.validation.input_key_mode', 'both');
+        $acceptName = in_array($mode, ['name_only', 'both'], true);
+        $acceptFieldKey = in_array($mode, ['field_key_only', 'both'], true);
+
+        $fieldByName = [];
+        $nameByFieldKey = [];
+        $globalAliasToName = [];
+        $conflicts = [];
+
+        foreach ($this->describeFields($schema) as $field) {
+            $name = (string) ($field['name'] ?? '');
+            $fieldKey = $field['field_key'] ?? null;
+
+            if ($name === '') {
+                continue;
+            }
+
+            $fieldByName[$name] = $field;
+
+            if (is_string($fieldKey) && $fieldKey !== '') {
+                $nameByFieldKey[$fieldKey] = $name;
+            }
+
+            foreach ($field['lookup_keys'] as $alias) {
+                if (! isset($globalAliasToName[$alias])) {
+                    $globalAliasToName[$alias] = $name;
+                    continue;
+                }
+
+                if ($globalAliasToName[$alias] !== $name) {
+                    $conflicts[] = $alias;
+                }
+            }
+        }
+
+        if ($conflicts !== []) {
+            throw new FormForgeException(trans('formforge::validation.conflicting_payload_keys', [
+                'keys' => implode(', ', array_values(array_unique($conflicts))),
+            ]));
+        }
+
+        $normalized = [];
+        $seenSourceKeys = [];
+
+        foreach ($payload as $inputKey => $value) {
+            if (! is_string($inputKey)) {
+                continue;
+            }
+
+            $resolvedName = null;
+
+            if ($acceptName && isset($fieldByName[$inputKey])) {
+                $resolvedName = $inputKey;
+            } elseif ($acceptFieldKey && isset($nameByFieldKey[$inputKey])) {
+                $resolvedName = $nameByFieldKey[$inputKey];
+            }
+
+            if ($resolvedName === null) {
+                $normalized[$inputKey] = $value;
+                continue;
+            }
+
+            if (! isset($seenSourceKeys[$resolvedName])) {
+                $seenSourceKeys[$resolvedName] = [];
+            }
+
+            $seenSourceKeys[$resolvedName][] = $inputKey;
+
+            if ($acceptName && $inputKey === $resolvedName) {
+                $normalized[$resolvedName] = $value;
+                continue;
+            }
+
+            if (! array_key_exists($resolvedName, $normalized)) {
+                $normalized[$resolvedName] = $value;
+            }
+        }
+
+        $payloadConflicts = [];
+
+        foreach ($seenSourceKeys as $name => $keys) {
+            $keys = array_values(array_unique($keys));
+
+            if (count($keys) <= 1) {
+                continue;
+            }
+
+            if (in_array($name, $keys, true)) {
+                continue;
+            }
+
+            $payloadConflicts[] = implode(' vs ', $keys);
+        }
+
+        if ($payloadConflicts !== []) {
+            throw new FormForgeException(trans('formforge::validation.conflicting_payload_keys', [
+                'keys' => implode(', ', $payloadConflicts),
+            ]));
+        }
+
+        return $normalized;
     }
 
     private function compileRules(array $fields): array

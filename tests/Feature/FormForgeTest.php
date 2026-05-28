@@ -151,6 +151,59 @@ it('rejects unknown fields by default and ignores them when configured', functio
     ]);
 });
 
+it('accepts field_key payloads and mixed payloads with name priority', function (): void {
+    $key = 'field_key_payload_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')->required()
+        ->email('email')->required();
+
+    $form = Form::get($key, '1');
+    $schema = $form->toArray();
+    $nameField = collect($schema['fields'])->firstWhere('name', 'name');
+    $emailField = collect($schema['fields'])->firstWhere('name', 'email');
+    $nameFieldKey = (string) ($nameField['field_key'] ?? '');
+    $emailFieldKey = (string) ($emailField['field_key'] ?? '');
+
+    $byFieldKey = $form->submit([
+        $nameFieldKey => 'Evan',
+        $emailFieldKey => 'evan@example.com',
+    ]);
+    expect($byFieldKey->payload)->toBe([
+        'name' => 'Evan',
+        'email' => 'evan@example.com',
+    ]);
+
+    $mixed = $form->submit([
+        'name' => 'Name Wins',
+        $nameFieldKey => 'Ignored',
+        $emailFieldKey => 'mail@example.com',
+    ]);
+    expect($mixed->payload)->toBe([
+        'name' => 'Name Wins',
+        'email' => 'mail@example.com',
+    ]);
+});
+
+it('rejects payload conflicts when multiple aliases target the same field without name', function (): void {
+    $validator = app(SubmissionValidator::class);
+    $schema = [
+        'fields' => [[
+            'name' => 'email',
+            'field_key' => 'email_field_key',
+            'key' => 'email_key',
+            'type' => 'email',
+            'rules' => ['required', 'email'],
+        ]],
+    ];
+
+    expect(static fn () => $validator->validate($schema, [
+        'email_field_key' => 'a@example.com',
+        'email_key' => 'b@example.com',
+    ]))->toThrow(\EvanSchleret\FormForge\Exceptions\FormForgeException::class);
+});
+
 it('validates a single field through form methods', function (): void {
     $key = 'field_validate_' . Str::lower(Str::random(8));
 

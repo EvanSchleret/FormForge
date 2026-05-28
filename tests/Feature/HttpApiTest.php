@@ -72,6 +72,31 @@ it('accepts form submissions over HTTP', function (): void {
     ]);
 });
 
+it('accepts field_key indexed submissions over HTTP', function (): void {
+    $key = 'submit_http_field_key_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')->required()
+        ->email('email')->required();
+
+    $schema = Form::get($key, '1')->toArray();
+    $nameField = collect($schema['fields'])->firstWhere('name', 'name');
+    $emailField = collect($schema['fields'])->firstWhere('name', 'email');
+    $nameFieldKey = (string) ($nameField['field_key'] ?? '');
+    $emailFieldKey = (string) ($emailField['field_key'] ?? '');
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'payload' => [
+            $nameFieldKey => 'Evan',
+            $emailFieldKey => 'evan@example.com',
+        ],
+    ])
+        ->assertCreated()
+        ->assertJsonPath('data.payload.name', 'Evan')
+        ->assertJsonPath('data.payload.email', 'evan@example.com');
+});
+
 it('rejects submission when endpoint auth is required and request is unauthenticated', function (): void {
     config()->set('formforge.http.submission.auth', 'required');
 

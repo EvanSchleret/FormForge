@@ -33,8 +33,9 @@ class SubmissionService
         array $submissionMeta = [],
     ): FormSubmission
     {
-        $effectiveSchema = FormSchemaLayout::resolve($schema, $payload);
-        $validated = $this->validator->validate($effectiveSchema, $payload);
+        $normalizedInputPayload = $this->validator->normalizeInputPayload($schema, $payload);
+        $effectiveSchema = FormSchemaLayout::resolve($schema, $normalizedInputPayload);
+        $validated = $this->validator->validate($effectiveSchema, $normalizedInputPayload);
         $fields = Arr::get($effectiveSchema, 'fields', []);
 
         if (! is_array($fields)) {
@@ -120,16 +121,18 @@ class SubmissionService
 
     public function validateFields(array $schema, array $payload, array $onlyFields = []): array
     {
-        $effectiveSchema = FormSchemaLayout::resolve($schema, $payload);
+        $normalizedInputPayload = $this->validator->normalizeInputPayload($schema, $payload);
+        $effectiveSchema = FormSchemaLayout::resolve($schema, $normalizedInputPayload);
 
-        return $this->validator->validateFields($effectiveSchema, $payload, $onlyFields);
+        return $this->validator->validateFields($effectiveSchema, $normalizedInputPayload, $onlyFields);
     }
 
     public function validateFieldsWithLocale(array $schema, array $payload, array $onlyFields = [], ?string $locale = null): array
     {
-        $effectiveSchema = FormSchemaLayout::resolve($schema, $payload);
+        $normalizedInputPayload = $this->validator->normalizeInputPayload($schema, $payload);
+        $effectiveSchema = FormSchemaLayout::resolve($schema, $normalizedInputPayload);
 
-        return $this->validator->validateFields($effectiveSchema, $payload, $onlyFields, $locale);
+        return $this->validator->validateFields($effectiveSchema, $normalizedInputPayload, $onlyFields, $locale);
     }
 
     private function normalizePayload(array $schema, array $fields, array $validated, ?Model $submittedBy = null): array
