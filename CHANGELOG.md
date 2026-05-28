@@ -4,6 +4,45 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog.
 
+## v1.5.2 - 2026-05-28
+
+### v1.5.2
+
+#### Added
+
+- Backend now accepts submission/validation payload keys by canonical `name` and `field_key` (default mode: `both`)
+- New validation config: `formforge.validation.input_key_mode` with:
+  - `name_only`
+  - `field_key_only`
+  - `both` (default)
+  
+
+#### Changed
+
+- Input key resolution now follows:
+  1. exact `name`
+  2. fallback exact `field_key`
+  
+- When both `name` and `field_key` are provided for the same field, `name` takes precedence
+- Payload sanitization/allowed-fields flow now supports `field_key` inputs through canonical normalization
+
+#### Error handling
+
+- Explicit conflict error when multiple aliases target the same field in a conflicting way
+- Unknown field behavior unchanged (`reject_unknown_fields` still applies as before)
+
+#### Tests
+
+- Added/updated coverage for:
+  - `name`-only payload
+  - `field_key`-only payload
+  - mixed `name + field_key` payload
+  - collision/conflict scenarios
+  - unknown field rejection compatibility
+  
+
+**Full Changelog**: https://github.com/EvanSchleret/FormForge/compare/v1.5.1...v1.5.2
+
 ## v1.5.1 - 2026-05-28
 
 ### v1.5.1
@@ -287,11 +326,13 @@ php artisan formforge:install:merge --skip-migrations --no-backup
 
 
 
+
 ```
 #### DB Migration
 
 ```bash
 php artisan migrate
+
 
 
 
