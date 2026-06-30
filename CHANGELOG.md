@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog.
 
+## v2.0.0 - 2026-06-30
+
+### v2.0.0
+
+We are thrilled to announce FormForge (API) v2.0.0, a major release that strengthens the schema foundation, makes export/import flows reliable, and adds deterministic resolution by form UUID.
+
+##### Added
+
+- Introduced a stable exportable field model for schema-driven CSV template generation, import mapping, and header validation
+- Added explicit flattening for composite fields, with `address` expanded into exportable leaf fields
+- Added public form resolution by `form_uuid`, with deterministic latest-version selection through `FormManager`, `ScopedFormManager`, and `FormDefinitionRepository`
+- Added reusable export/import helper APIs so downstream consumers can rely on the same schema source of truth
+
+##### Changed
+
+- Export and import flows now share one schema-derived representation instead of assuming one field equals one column
+- Composite fields are no longer treated as a single CSV column by default
+- Latest-by-UUID resolution now uses stable ordering by `version_number DESC` and `id DESC`
+- Validation and submission flows continue to use the same normalized schema model
+
+##### Tests
+
+- Added coverage for simple fields, composite fields, `address` expansion, header validation, unknown and missing forms, and latest-by-UUID resolution
+
+**Full Changelog**: https://github.com/EvanSchleret/FormForge/compare/v1.5.2...v2.0.0
+
 ## v1.5.2 - 2026-05-28
 
 ### v1.5.2
@@ -20,11 +46,14 @@ The format is based on Keep a Changelog.
 #### Changed
 
 - Input key resolution now follows:
+  
   1. exact `name`
   2. fallback exact `field_key`
   
 - When both `name` and `field_key` are provided for the same field, `name` takes precedence
+  
 - Payload sanitization/allowed-fields flow now supports `field_key` inputs through canonical normalization
+  
 
 #### Error handling
 
@@ -334,11 +363,13 @@ php artisan formforge:install:merge --skip-migrations --no-backup
 
 
 
+
 ```
 #### DB Migration
 
 ```bash
 php artisan migrate
+
 
 
 
