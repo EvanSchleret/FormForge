@@ -6,12 +6,17 @@ namespace EvanSchleret\FormForge\Definition;
 
 use BadMethodCallException;
 use EvanSchleret\FormForge\Exceptions\InvalidFieldDefinitionException;
+use EvanSchleret\FormForge\Support\RichTextSanitizer;
 
 class FieldBlueprint
 {
     private ?FormBlueprint $form;
 
     private string $type;
+
+    private ?string $temporalMode = null;
+
+    private ?int $hourCycle = null;
 
     private string $name;
 
@@ -45,7 +50,13 @@ class FieldBlueprint
 
     private bool $disabled = false;
 
+    private ?string $consentLabel = null;
+
+    private ?string $display = null;
+
     private array $accept = [];
+
+    private array $addressFields = [];
 
     private ?int $maxSize = null;
 
@@ -59,6 +70,7 @@ class FieldBlueprint
 
     public function __construct(?FormBlueprint $form, string $type, string $name)
     {
+        $type = FieldType::normalize($type);
         FieldType::assert($type);
 
         $name = trim($name);
@@ -70,18 +82,29 @@ class FieldBlueprint
         $this->form = $form;
         $this->type = $type;
         $this->name = $name;
+
+        if ($type === FieldType::TEMPORAL) {
+            $this->temporalMode = 'date';
+        }
+
+        if ($type === FieldType::ADDRESS) {
+            $this->addressFields = $this->defaultAddressFields();
+        }
     }
 
     public static function fromSchemaArray(array $schema): self
     {
+        $rawType = (string) ($schema['type'] ?? '');
         $field = new self(
             null,
-            (string) ($schema['type'] ?? ''),
+            $rawType,
             (string) ($schema['name'] ?? ''),
         );
 
         $field->fieldKey = isset($schema['field_key']) ? trim((string) $schema['field_key']) : null;
-        $field->label = isset($schema['label']) ? trim((string) $schema['label']) : null;
+        $field->label = isset($schema['label'])
+            ? self::nullIfEmpty(self::sanitizeRichText($schema['label']))
+            : null;
         $field->required = (bool) ($schema['required'] ?? false);
         $field->default = $schema['default'] ?? null;
         $field->placeholder = isset($schema['placeholder']) ? (string) $schema['placeholder'] : null;
@@ -94,7 +117,28 @@ class FieldBlueprint
         $field->options = is_array($schema['options'] ?? null) ? $field->normalizeOptions($schema['options']) : [];
         $field->multiple = (bool) ($schema['multiple'] ?? false);
         $field->disabled = (bool) ($schema['disabled'] ?? false);
+        $field->consentLabel = isset($schema['consent_label']) ? trim((string) $schema['consent_label']) : null;
+        $field->display = isset($schema['display']) ? trim((string) $schema['display']) : null;
+        if (array_key_exists('temporal_mode', $schema) && is_string($schema['temporal_mode']) && FieldType::normalize($rawType) === FieldType::TEMPORAL) {
+            $field->temporalMode = self::normalizeTemporalMode($schema['temporal_mode']);
+        }
+
+        if ($field->temporalMode === null && FieldType::temporalMode($rawType) !== null) {
+            $field->temporalMode = FieldType::temporalMode($rawType);
+        }
+
+        if (array_key_exists('hour_cycle', $schema) && is_int($schema['hour_cycle']) && in_array($schema['hour_cycle'], [12, 24], true)) {
+            $field->hourCycle = $schema['hour_cycle'];
+        }
+
+        if ($field->temporalMode === 'time' && $field->hourCycle === null) {
+            $field->hourCycle = 24;
+        }
+
         $field->accept = array_values(array_filter(array_map('strval', (array) ($schema['accept'] ?? [])), static fn (string $value): bool => trim($value) !== ''));
+        if (array_key_exists('address_fields', $schema) && is_array($schema['address_fields'])) {
+            $field->addressFields = $field->normalizeAddressFields($schema['address_fields']);
+        }
         $field->maxSize = isset($schema['max_size']) ? (int) $schema['max_size'] : null;
         $field->maxFiles = isset($schema['max_files']) ? (int) $schema['max_files'] : null;
 
@@ -128,6 +172,11 @@ class FieldBlueprint
         return $this->type;
     }
 
+    public function temporalMode(): ?string
+    {
+        return $this->temporalMode;
+    }
+
     public function name(): string
     {
         return $this->name;
@@ -148,7 +197,7 @@ class FieldBlueprint
 
     public function label(string $label): self
     {
-        $label = trim($label);
+        $label = self::sanitizeRichText($label);
 
         if ($label === '') {
             throw new InvalidFieldDefinitionException("Field label for [{$this->name}] cannot be empty.");
@@ -266,6 +315,49 @@ class FieldBlueprint
     public function disabled(bool $disabled = true): self
     {
         $this->disabled = $disabled;
+
+        return $this;
+    }
+
+    public function consentLabel(string $consentLabel): self
+    {
+        $consentLabel = trim($consentLabel);
+
+        if ($consentLabel === '') {
+            throw new InvalidFieldDefinitionException("consentLabel cannot be empty on field [{$this->name}].");
+        }
+
+        $this->consentLabel = $consentLabel;
+
+        return $this;
+    }
+
+    public function display(string $display): self
+    {
+        $display = trim($display);
+        $this->display = $display === '' ? null : $display;
+
+        return $this;
+    }
+
+    public function temporalModeValue(string $mode): self
+    {
+        $this->temporalMode = self::normalizeTemporalMode($mode);
+
+        if ($this->temporalMode === 'time' && $this->hourCycle === null) {
+            $this->hourCycle = 24;
+        }
+
+        return $this;
+    }
+
+    public function hourCycle(int $hourCycle): self
+    {
+        if (! in_array($hourCycle, [12, 24], true)) {
+            throw new InvalidFieldDefinitionException("hourCycle must be 12 or 24 on field [{$this->name}].");
+        }
+
+        $this->hourCycle = $hourCycle;
 
         return $this;
     }
@@ -414,6 +506,33 @@ class FieldBlueprint
         return $this->visibility;
     }
 
+    public function consentLabelValue(): ?string
+    {
+        return $this->consentLabel;
+    }
+
+    public function displayValue(): ?string
+    {
+        return $this->display;
+    }
+
+    public function hourCycleValue(): ?int
+    {
+        return $this->hourCycle;
+    }
+
+    public function addressFieldsValue(): array
+    {
+        return $this->addressFields;
+    }
+
+    public function addressFields(array $addressFields): self
+    {
+        $this->addressFields = $this->normalizeAddressFields($addressFields);
+
+        return $this;
+    }
+
     public function toSchemaArray(string $formKey, string $version): array
     {
         $schema = [
@@ -455,8 +574,28 @@ class FieldBlueprint
             $schema['disabled'] = true;
         }
 
+        if ($this->consentLabel !== null) {
+            $schema['consent_label'] = $this->consentLabel;
+        }
+
+        if ($this->display !== null) {
+            $schema['display'] = $this->display;
+        }
+
+        if ($this->temporalMode !== null) {
+            $schema['temporal_mode'] = $this->temporalMode;
+        }
+
+        if ($this->hourCycle !== null && $this->temporalMode === 'time') {
+            $schema['hour_cycle'] = $this->hourCycle;
+        }
+
         if ($this->options !== []) {
             $schema['options'] = $this->options;
+        }
+
+        if ($this->addressFields !== []) {
+            $schema['address_fields'] = $this->addressFields;
         }
 
         if ($this->type === FieldType::FILE) {
@@ -533,6 +672,16 @@ class FieldBlueprint
         return array_values(array_unique($normalized));
     }
 
+    private static function sanitizeRichText(mixed $value): string
+    {
+        return RichTextSanitizer::sanitize(is_string($value) ? $value : (string) $value);
+    }
+
+    private static function nullIfEmpty(string $value): ?string
+    {
+        return trim($value) === '' ? null : $value;
+    }
+
     private function mergeArrays(array $left, array $right): array
     {
         foreach ($right as $key => $value) {
@@ -589,6 +738,54 @@ class FieldBlueprint
         return $normalized;
     }
 
+    private static function normalizeTemporalMode(string $mode): string
+    {
+        return in_array($mode, ['date', 'time'], true)
+            ? $mode
+            : 'date';
+    }
+
+    private function normalizeAddressFields(array $addressFields): array
+    {
+        $normalized = [];
+
+        foreach ($addressFields as $addressField) {
+            if (! is_array($addressField)) {
+                continue;
+            }
+
+            $key = trim((string) ($addressField['key'] ?? ''));
+            $hasLabel = array_key_exists('label', $addressField)
+                && (is_string($addressField['label']) || $addressField['label'] === null);
+            $label = $hasLabel ? trim((string) $addressField['label']) : '';
+
+            if ($key === '') {
+                continue;
+            }
+
+            $normalized[] = [
+                'key' => $key,
+                'label' => $label,
+                'visible' => (bool) ($addressField['visible'] ?? true),
+                'required' => (bool) ($addressField['required'] ?? false),
+            ];
+        }
+
+        return $normalized;
+    }
+
+    private function defaultAddressFields(): array
+    {
+        return [
+            ['key' => 'line1', 'label' => trans('formforge::messages.address_line1'), 'visible' => true, 'required' => true],
+            ['key' => 'line2', 'label' => trans('formforge::messages.address_line2'), 'visible' => false, 'required' => false],
+            ['key' => 'city', 'label' => trans('formforge::messages.address_city'), 'visible' => true, 'required' => true],
+            ['key' => 'state', 'label' => trans('formforge::messages.address_state'), 'visible' => false, 'required' => false],
+            ['key' => 'zip', 'label' => trans('formforge::messages.address_zip'), 'visible' => true, 'required' => true],
+            ['key' => 'country', 'label' => trans('formforge::messages.address_country'), 'visible' => true, 'required' => true],
+        ];
+    }
+
     private function resolveRules(): array
     {
         if ($this->replaceRules !== []) {
@@ -610,37 +807,45 @@ class FieldBlueprint
     {
         $rules = [];
 
-        if ($this->required) {
+        if ($this->required && $this->type !== FieldType::CONSENT && $this->type !== FieldType::ADDRESS) {
             $rules[] = 'required';
         }
 
         switch ($this->type) {
             case FieldType::TEXT:
-            case FieldType::TEXTAREA:
                 $rules[] = 'string';
-                break;
-
-            case FieldType::EMAIL:
-                $rules[] = 'string';
-                $rules[] = 'email';
                 break;
 
             case FieldType::NUMBER:
                 $rules[] = 'numeric';
                 break;
 
-            case FieldType::SELECT:
-            case FieldType::SELECT_MENU:
             case FieldType::RADIO:
                 break;
 
-            case FieldType::CHECKBOX:
-            case FieldType::SWITCH:
+            case FieldType::CONSENT:
                 $rules[] = 'boolean';
+                if ($this->required) {
+                    $rules[] = 'accepted';
+                }
                 break;
 
             case FieldType::CHECKBOX_GROUP:
                 $rules[] = 'array';
+                break;
+
+            case FieldType::ADDRESS:
+                $rules[] = 'array';
+                break;
+
+            case FieldType::TEMPORAL:
+                if ($this->temporalMode === 'date') {
+                    $rules[] = 'date_format:Y-m-d';
+                } elseif ($this->temporalMode === 'time') {
+                    $rules[] = 'date_format:H:i:s';
+                } else {
+                    $rules[] = 'date_format:Y-m-d';
+                }
                 break;
 
             case FieldType::DATE:
@@ -651,22 +856,15 @@ class FieldBlueprint
                 $rules[] = 'date_format:H:i:s';
                 break;
 
-            case FieldType::DATETIME:
-                $rules[] = 'date';
-                break;
-
-            case FieldType::DATE_RANGE:
-            case FieldType::DATETIME_RANGE:
-                $rules[] = 'array';
-                break;
-
             case FieldType::FILE:
                 $rules[] = $this->multiple ? 'array' : 'file';
                 break;
         }
 
         if ($this->min !== null) {
-            if ($this->type === FieldType::DATE || $this->type === FieldType::DATETIME) {
+            if ($this->type === FieldType::TEMPORAL && $this->temporalMode === 'date') {
+                $rules[] = 'after_or_equal:' . $this->min;
+            } elseif ($this->type === FieldType::DATE) {
                 $rules[] = 'after_or_equal:' . $this->min;
             } else {
                 $rules[] = 'min:' . $this->min;
@@ -674,7 +872,9 @@ class FieldBlueprint
         }
 
         if ($this->max !== null) {
-            if ($this->type === FieldType::DATE || $this->type === FieldType::DATETIME) {
+            if ($this->type === FieldType::TEMPORAL && $this->temporalMode === 'date') {
+                $rules[] = 'before_or_equal:' . $this->max;
+            } elseif ($this->type === FieldType::DATE) {
                 $rules[] = 'before_or_equal:' . $this->max;
             } else {
                 $rules[] = 'max:' . $this->max;

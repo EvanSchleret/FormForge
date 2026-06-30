@@ -105,6 +105,31 @@ class SubmissionService
         return $this->validator->validateField($effectiveSchema, $field, $value, $locale);
     }
 
+    public function exportableFields(array $schema): array
+    {
+        return $this->validator->exportableFields($schema);
+    }
+
+    public function flattenExportableFields(array $schema): array
+    {
+        return $this->validator->flattenExportableFields($schema);
+    }
+
+    public function resolveExportableField(array $schema, string $identifier): ?array
+    {
+        return $this->validator->resolveExportableField($schema, $identifier);
+    }
+
+    public function validateExportableHeaders(array $schema, array $headers): array
+    {
+        return $this->validator->validateExportableHeaders($schema, $headers);
+    }
+
+    public function mapExportableRow(array $schema, array $row, bool $strict = true): array
+    {
+        return $this->validator->mapExportableRow($schema, $row, $strict);
+    }
+
     public function describeFields(array $schema): array
     {
         $effectiveSchema = FormSchemaLayout::resolve($schema);
@@ -156,7 +181,7 @@ class SubmissionService
 
             if (! $hasValue) {
                 if (array_key_exists('default', $field) && $field['default'] !== null) {
-                    $payload[$name] = $this->normalizeValue($type, $field['default']);
+                    $payload[$name] = $this->normalizeValue($field, $field['default']);
                 }
 
                 continue;
@@ -191,41 +216,36 @@ class SubmissionService
                 continue;
             }
 
-            $payload[$name] = $this->normalizeValue($type, $value);
+            $payload[$name] = $this->normalizeValue($field, $value);
         }
 
         return [$payload, $files];
     }
 
-    private function normalizeValue(string $type, mixed $value): mixed
+    private function normalizeValue(array $field, mixed $value): mixed
     {
+        $type = FieldType::normalize((string) ($field['type'] ?? ''));
+        $temporalMode = (string) ($field['temporal_mode'] ?? FieldType::temporalMode((string) ($field['type'] ?? '')) ?? 'date');
+
         return match ($type) {
             FieldType::TEXT,
-            FieldType::TEXTAREA,
-            FieldType::EMAIL => (string) $value,
+            FieldType::RADIO => (string) $value,
 
             FieldType::NUMBER => $this->normalizeNumber($value),
 
-            FieldType::CHECKBOX,
-            FieldType::SWITCH => (bool) $value,
+            FieldType::CONSENT => (bool) $value,
 
             FieldType::CHECKBOX_GROUP => array_values(is_array($value) ? $value : [$value]),
+
+            FieldType::TEMPORAL => match ($temporalMode) {
+                'date' => Carbon::parse((string) $value)->format('Y-m-d'),
+                'time' => Carbon::parse((string) $value)->format('H:i:s'),
+                default => $value,
+            },
 
             FieldType::DATE => Carbon::parse((string) $value)->format('Y-m-d'),
 
             FieldType::TIME => Carbon::parse((string) $value)->format('H:i:s'),
-
-            FieldType::DATETIME => Carbon::parse((string) $value)->toIso8601String(),
-
-            FieldType::DATE_RANGE => [
-                'start' => Carbon::parse((string) Arr::get($value, 'start'))->format('Y-m-d'),
-                'end' => Carbon::parse((string) Arr::get($value, 'end'))->format('Y-m-d'),
-            ],
-
-            FieldType::DATETIME_RANGE => [
-                'start' => Carbon::parse((string) Arr::get($value, 'start'))->toIso8601String(),
-                'end' => Carbon::parse((string) Arr::get($value, 'end'))->toIso8601String(),
-            ],
 
             default => $value,
         };

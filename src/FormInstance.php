@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace EvanSchleret\FormForge;
 
 use EvanSchleret\FormForge\Models\FormSubmission;
+use EvanSchleret\FormForge\Support\FormPublicLinkResolver;
 use EvanSchleret\FormForge\Submissions\SubmissionService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 
 class FormInstance
 {
@@ -25,6 +27,11 @@ class FormInstance
     public function version(): string
     {
         return (string) ($this->schema['version'] ?? '');
+    }
+
+    public function schemaVersion(): int
+    {
+        return (int) ($this->schema['schema_version'] ?? 1);
     }
 
     public function title(): string
@@ -78,9 +85,98 @@ class FormInstance
         return (bool) config('formforge.forms.default_published', true);
     }
 
+    public function publishAt(): ?Carbon
+    {
+        return $this->resolveDateTime($this->schema['publish_at'] ?? null);
+    }
+
+    public function pauseAt(): ?Carbon
+    {
+        return $this->resolveDateTime($this->schema['pause_at'] ?? null);
+    }
+
+    public function responseLimit(): ?int
+    {
+        $value = $this->schema['response_limit'] ?? null;
+
+        if (is_int($value) && $value > 0) {
+            return $value;
+        }
+
+        if (is_string($value)) {
+            $value = trim($value);
+
+            if ($value !== '' && ctype_digit($value)) {
+                $limit = (int) $value;
+
+                return $limit > 0 ? $limit : null;
+            }
+        }
+
+        return null;
+    }
+
+    public function submissionCodeRequired(): bool
+    {
+        return (bool) ($this->schema['submission_code_required'] ?? false);
+    }
+
+    public function publicUrl(): ?string
+    {
+        $request = request();
+
+        if (! $request instanceof Request) {
+            return null;
+        }
+
+        $configured = config('formforge.http.public_link.resolver');
+
+        if (! is_string($configured) || trim($configured) === '') {
+            return null;
+        }
+
+        if (! class_exists($configured) || ! is_subclass_of($configured, FormPublicLinkResolver::class)) {
+            return null;
+        }
+
+        $resolver = app($configured);
+
+        if (! $resolver instanceof FormPublicLinkResolver) {
+            return null;
+        }
+
+        return $resolver->resolve([
+            'key' => $this->key(),
+            'version' => $this->version(),
+            'schema' => $this->schema,
+        ], $request);
+    }
+
+    private function resolveDateTime(mixed $value): ?Carbon
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $value = trim($value);
+
+        if ($value === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($value);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
     public function toArray(): array
     {
-        return $this->schema;
+        $schema = $this->schema;
+        $schema['public_url'] = $this->publicUrl();
+
+        return $schema;
     }
 
     public function toJson(int $options = 0): string
@@ -111,6 +207,31 @@ class FormInstance
     public function validateField(string $field, mixed $value, ?string $locale = null): array
     {
         return $this->submissionService->validateFieldWithLocale($this->schema, $field, $value, $locale);
+    }
+
+    public function exportableFields(): array
+    {
+        return $this->submissionService->exportableFields($this->schema);
+    }
+
+    public function flattenExportableFields(): array
+    {
+        return $this->submissionService->flattenExportableFields($this->schema);
+    }
+
+    public function resolveExportableField(string $identifier): ?array
+    {
+        return $this->submissionService->resolveExportableField($this->schema, $identifier);
+    }
+
+    public function validateExportableHeaders(array $headers): array
+    {
+        return $this->submissionService->validateExportableHeaders($this->schema, $headers);
+    }
+
+    public function mapExportableRow(array $row, bool $strict = true): array
+    {
+        return $this->submissionService->mapExportableRow($this->schema, $row, $strict);
     }
 
     public function describeFields(): array

@@ -4,10 +4,16 @@ declare(strict_types=1);
 
 namespace EvanSchleret\FormForge\Support;
 
+use EvanSchleret\FormForge\Definition\FieldType;
 use EvanSchleret\FormForge\Exceptions\InvalidFieldDefinitionException;
+use EvanSchleret\FormForge\Support\RichTextSanitizer;
 
 final class FormSchemaLayout
 {
+    public const SCHEMA_VERSION_V1 = 1;
+    public const SCHEMA_VERSION_V2 = 2;
+    public const LATEST_SCHEMA_VERSION = self::SCHEMA_VERSION_V2;
+
     public const TARGET_PAGE = 'page';
     public const TARGET_FIELD = 'field';
 
@@ -38,6 +44,11 @@ final class FormSchemaLayout
         $key = trim((string) ($schema['key'] ?? ''));
         $version = trim((string) ($schema['version'] ?? ''));
         $title = trim((string) ($schema['title'] ?? $key));
+        $schemaVersion = (int) ($schema['schema_version'] ?? self::SCHEMA_VERSION_V1);
+
+        if ($schemaVersion <= 0) {
+            $schemaVersion = self::SCHEMA_VERSION_V1;
+        }
 
         $pagesRaw = self::normalizePagesInput(
             pages: $schema['pages'] ?? null,
@@ -82,7 +93,8 @@ final class FormSchemaLayout
                 }
 
                 $name = trim((string) ($fieldRaw['name'] ?? ''));
-                $type = trim((string) ($fieldRaw['type'] ?? ''));
+                $rawType = trim((string) ($fieldRaw['type'] ?? ''));
+                $type = FieldType::normalize($rawType);
 
                 if ($name === '' || $type === '') {
                     throw new InvalidFieldDefinitionException("Page [{$pageKey}] fields must contain name and type.");
@@ -107,13 +119,42 @@ final class FormSchemaLayout
                 $field = $fieldRaw;
                 $field['field_key'] = $fieldKey;
                 $field['page_key'] = $pageKey;
+                $field['type'] = $type;
                 unset($field['section_key']);
                 $field['required'] = (bool) ($fieldRaw['required'] ?? false);
                 $field['disabled'] = (bool) ($fieldRaw['disabled'] ?? false);
                 unset($field['nullable'], $field['readonly']);
 
-                if (! isset($field['label']) || trim((string) $field['label']) === '') {
-                    $field['label'] = ucfirst(str_replace('_', ' ', $name));
+                if ($type === FieldType::TEMPORAL) {
+                    $temporalMode = self::normalizeTemporalMode(
+                        is_string($fieldRaw['temporal_mode'] ?? null) ? (string) $fieldRaw['temporal_mode'] : (FieldType::temporalMode($rawType) ?? 'date')
+                    );
+                    $field['temporal_mode'] = $temporalMode;
+                    if ($temporalMode === 'time') {
+                        $field['hour_cycle'] = self::normalizeHourCycle($fieldRaw['hour_cycle'] ?? null);
+                    } else {
+                        unset($field['hour_cycle']);
+                    }
+                } else {
+                    unset($field['temporal_mode']);
+                    unset($field['hour_cycle']);
+                }
+
+                if (array_key_exists('label', $field)) {
+                    $sanitizedLabel = self::sanitizeRichText((string) $field['label']);
+                    if ($type === FieldType::ADDRESS && trim($sanitizedLabel) === '') {
+                        $field['label'] = '';
+                    } else {
+                        $field['label'] = trim($sanitizedLabel) !== ''
+                            ? $sanitizedLabel
+                            : ($type === FieldType::TEMPORAL
+                                ? self::defaultTemporalLabel((string) ($field['temporal_mode'] ?? 'date'))
+                                : ucfirst(str_replace('_', ' ', $name)));
+                    }
+                } else {
+                    $field['label'] = $type === FieldType::TEMPORAL
+                        ? self::defaultTemporalLabel((string) ($field['temporal_mode'] ?? 'date'))
+                        : ucfirst(str_replace('_', ' ', $name));
                 }
 
                 if (! isset($field['meta']) || ! is_array($field['meta'])) {
@@ -127,11 +168,17 @@ final class FormSchemaLayout
                 $fields[] = $field;
             }
 
+            $meta = is_array($pageRaw['meta'] ?? null) ? $pageRaw['meta'] : [];
+
+            if (array_key_exists('logic', $meta)) {
+                $meta['logic'] = self::normalizePageLogic($meta['logic']);
+            }
+
             $pages[] = [
                 'page_key' => $pageKey,
                 'title' => $pageTitle,
                 'description' => self::normalizeOptionalString($pageRaw['description'] ?? null),
-                'meta' => is_array($pageRaw['meta'] ?? null) ? $pageRaw['meta'] : [],
+                'meta' => $meta,
                 'fields' => $fields,
             ];
         }
@@ -148,6 +195,7 @@ final class FormSchemaLayout
 
         $normalized = $schema;
         $normalized['title'] = $title;
+        $normalized['schema_version'] = $schemaVersion;
         $normalized['pages'] = $pages;
         $normalized['fields'] = $flatFields;
         $normalized['conditions'] = $conditions;
@@ -208,74 +256,189 @@ final class FormSchemaLayout
         }
 
         $conditionDebug = [];
+        $pageLogicDebug = [];
+        $hasPageLogic = false;
+        $pageLogicByPage = [];
 
-        foreach ($conditions as $condition) {
-            if (! is_array($condition)) {
+        foreach ($pages as $page) {
+            if (! is_array($page)) {
                 continue;
             }
 
-            $targetType = (string) ($condition['target_type'] ?? '');
-            $targetKey = (string) ($condition['target_key'] ?? '');
-            $action = (string) ($condition['action'] ?? '');
-            $matchMode = (string) ($condition['match'] ?? self::MATCH_ALL);
-            $clauses = $condition['when'] ?? [];
+            $pageKey = (string) ($page['page_key'] ?? '');
 
-            if (! is_array($clauses) || $clauses === []) {
+            if ($pageKey === '') {
                 continue;
             }
 
-            $evaluations = [];
+            $logic = self::normalizePageLogic($page['meta']['logic'] ?? null);
 
-            foreach ($clauses as $clause) {
-                if (! is_array($clause)) {
+            if (($logic['rules'] ?? []) === []) {
+                continue;
+            }
+
+            $hasPageLogic = true;
+            $pageLogicByPage[$pageKey] = $logic;
+        }
+
+        if ($hasPageLogic) {
+            foreach ($pages as $page) {
+                if (! is_array($page)) {
                     continue;
                 }
 
-                $fieldKey = (string) ($clause['field_key'] ?? '');
-                $operator = (string) ($clause['operator'] ?? self::OP_EQ);
-                $expected = $clause['value'] ?? null;
-                $fieldName = $fieldNameByKey[$fieldKey] ?? null;
-                $actual = $fieldName !== null ? ($payload[$fieldName] ?? null) : null;
-                $result = self::evaluate($actual, $operator, $expected);
+                $pageKey = (string) ($page['page_key'] ?? '');
+                $logic = $pageLogicByPage[$pageKey] ?? null;
 
-                $evaluations[] = $result;
+                if ($pageKey === '' || ! is_array($logic)) {
+                    continue;
+                }
+
+                $fieldLookup = [];
+
+                foreach ((array) ($page['fields'] ?? []) as $field) {
+                    if (! is_array($field)) {
+                        continue;
+                    }
+
+                    $fieldKey = (string) ($field['field_key'] ?? '');
+                    $fieldName = (string) ($field['name'] ?? '');
+
+                    if ($fieldKey !== '' && $fieldName !== '') {
+                        $fieldLookup[$fieldKey] = $fieldName;
+                    }
+                }
+
+                foreach ((array) ($logic['rules'] ?? []) as $rule) {
+                    if (! is_array($rule)) {
+                        continue;
+                    }
+
+                    $evaluations = [];
+
+                    foreach ((array) ($rule['when'] ?? []) as $clause) {
+                        if (! is_array($clause)) {
+                            continue;
+                        }
+
+                        $fieldKey = (string) ($clause['field_key'] ?? '');
+                        $operator = (string) ($clause['operator'] ?? self::OP_EQ);
+                        $expected = $clause['value'] ?? null;
+                        $fieldName = $fieldLookup[$fieldKey] ?? null;
+                        $actual = $fieldName !== null ? ($payload[$fieldName] ?? null) : null;
+
+                        $evaluations[] = self::evaluatePageLogicClause($actual, $operator, $expected);
+                    }
+
+                    if ($evaluations === []) {
+                        continue;
+                    }
+
+                    $matched = (string) ($rule['match'] ?? self::MATCH_ALL) === self::MATCH_ANY
+                        ? in_array(true, $evaluations, true)
+                        : ! in_array(false, $evaluations, true);
+
+                    if ($debug) {
+                        $pageLogicDebug[] = [
+                            'page_key' => $pageKey,
+                            'rule_key' => (string) ($rule['rule_key'] ?? ''),
+                            'matched' => $matched,
+                            'evaluations' => $evaluations,
+                        ];
+                    }
+
+                    if (! $matched) {
+                        continue;
+                    }
+
+                    foreach ((array) ($rule['then'] ?? []) as $thenAction) {
+                        if (! is_array($thenAction)) {
+                            continue;
+                        }
+
+                        if ((string) ($thenAction['action'] ?? '') !== 'require') {
+                            continue;
+                        }
+
+                        $fieldKey = trim((string) ($thenAction['field_key'] ?? ''));
+
+                        if ($fieldKey === '' || ! array_key_exists($fieldKey, $fieldNameByKey)) {
+                            continue;
+                        }
+
+                        $fieldRequired[$fieldKey] = true;
+                    }
+                }
             }
+        } else {
+            foreach ($conditions as $condition) {
+                if (! is_array($condition)) {
+                    continue;
+                }
 
-            if ($evaluations === []) {
-                continue;
+                $targetType = (string) ($condition['target_type'] ?? '');
+                $targetKey = (string) ($condition['target_key'] ?? '');
+                $action = (string) ($condition['action'] ?? '');
+                $matchMode = (string) ($condition['match'] ?? self::MATCH_ALL);
+                $clauses = $condition['when'] ?? [];
+
+                if (! is_array($clauses) || $clauses === []) {
+                    continue;
+                }
+
+                $evaluations = [];
+
+                foreach ($clauses as $clause) {
+                    if (! is_array($clause)) {
+                        continue;
+                    }
+
+                    $fieldKey = (string) ($clause['field_key'] ?? '');
+                    $operator = (string) ($clause['operator'] ?? self::OP_EQ);
+                    $expected = $clause['value'] ?? null;
+                    $fieldName = $fieldNameByKey[$fieldKey] ?? null;
+                    $actual = $fieldName !== null ? ($payload[$fieldName] ?? null) : null;
+                    $result = self::evaluate($actual, $operator, $expected);
+
+                    $evaluations[] = $result;
+                }
+
+                if ($evaluations === []) {
+                    continue;
+                }
+
+                $matched = $matchMode === self::MATCH_ANY
+                    ? in_array(true, $evaluations, true)
+                    : ! in_array(false, $evaluations, true);
+
+                if ($debug) {
+                    $conditionDebug[] = [
+                        'condition_key' => (string) ($condition['condition_key'] ?? ''),
+                        'target_type' => $targetType,
+                        'target_key' => $targetKey,
+                        'action' => $action,
+                        'matched' => $matched,
+                        'evaluations' => $evaluations,
+                    ];
+                }
+
+                if (! $matched) {
+                    continue;
+                }
+
+                self::applyAction(
+                    targetType: $targetType,
+                    targetKey: $targetKey,
+                    action: $action,
+                    pageVisible: $pageVisible,
+                    pageHiddenHard: $pageHiddenHard,
+                    fieldVisible: $fieldVisible,
+                    fieldHiddenHard: $fieldHiddenHard,
+                    fieldRequired: $fieldRequired,
+                    fieldDisabled: $fieldDisabled,
+                    fieldsByPage: $fieldsByPage,
+                );
             }
-
-            $matched = $matchMode === self::MATCH_ANY
-                ? in_array(true, $evaluations, true)
-                : ! in_array(false, $evaluations, true);
-
-            if ($debug) {
-                $conditionDebug[] = [
-                    'condition_key' => (string) ($condition['condition_key'] ?? ''),
-                    'target_type' => $targetType,
-                    'target_key' => $targetKey,
-                    'action' => $action,
-                    'matched' => $matched,
-                    'evaluations' => $evaluations,
-                ];
-            }
-
-            if (! $matched) {
-                continue;
-            }
-
-            self::applyAction(
-                targetType: $targetType,
-                targetKey: $targetKey,
-                action: $action,
-                pageVisible: $pageVisible,
-                pageHiddenHard: $pageHiddenHard,
-                fieldVisible: $fieldVisible,
-                fieldHiddenHard: $fieldHiddenHard,
-                fieldRequired: $fieldRequired,
-                fieldDisabled: $fieldDisabled,
-                fieldsByPage: $fieldsByPage,
-            );
         }
 
         $effectivePages = [];
@@ -322,6 +485,7 @@ final class FormSchemaLayout
         if ($debug) {
             $resolved['debug'] = [
                 'conditions' => $conditionDebug,
+                'page_logic' => $pageLogicDebug,
                 'visible' => [
                     'pages' => array_values(array_keys(array_filter($pageVisible, static fn (bool $state): bool => $state))),
                     'fields' => array_values(array_keys(array_filter($fieldVisible, static fn (bool $state): bool => $state))),
@@ -514,6 +678,174 @@ final class FormSchemaLayout
         return $normalized;
     }
 
+    private static function normalizePageLogic(mixed $logic): array
+    {
+        if (! is_array($logic)) {
+            return [
+                'version' => 1,
+                'rules' => [],
+            ];
+        }
+
+        $rules = [];
+
+        foreach ((array) ($logic['rules'] ?? []) as $index => $ruleRaw) {
+            if (! is_array($ruleRaw)) {
+                continue;
+            }
+
+            $rules[] = self::normalizePageLogicRule($ruleRaw, is_int($index) ? $index : count($rules));
+        }
+
+        return [
+            'version' => (($version = (int) ($logic['version'] ?? 1)) > 0) ? $version : 1,
+            'rules' => $rules,
+        ];
+    }
+
+    private static function normalizePageLogicRule(array $ruleRaw, int $index): array
+    {
+        $when = [];
+
+        foreach ((array) ($ruleRaw['when'] ?? []) as $clauseRaw) {
+            if (! is_array($clauseRaw)) {
+                continue;
+            }
+
+            $when[] = self::normalizePageLogicClause($clauseRaw);
+        }
+
+        $then = [];
+
+        foreach ((array) ($ruleRaw['then'] ?? []) as $thenRaw) {
+            if (! is_array($thenRaw)) {
+                continue;
+            }
+
+            $then[] = self::normalizePageLogicThen($thenRaw);
+        }
+
+        $fallback = self::normalizePageLogicFallback($ruleRaw['fallback'] ?? null);
+
+        $dedupedThen = [];
+        $seenRequireFieldKeys = [];
+
+        foreach ($then as $thenAction) {
+            if (($thenAction['action'] ?? null) === 'require') {
+                $fieldKey = trim((string) ($thenAction['field_key'] ?? ''));
+
+                if ($fieldKey !== '' && in_array($fieldKey, $seenRequireFieldKeys, true)) {
+                    continue;
+                }
+
+                if ($fieldKey !== '') {
+                    $seenRequireFieldKeys[] = $fieldKey;
+                }
+            }
+
+            $dedupedThen[] = $thenAction;
+        }
+
+        return [
+            'rule_key' => self::normalizeKeyValue($ruleRaw['rule_key'] ?? null, 'lr_' . substr(hash('sha256', (string) $index), 0, 6)),
+            'match' => (string) ($ruleRaw['match'] ?? self::MATCH_ALL) === self::MATCH_ANY ? self::MATCH_ANY : self::MATCH_ALL,
+            'when' => $when !== [] ? $when : [[
+                'field_key' => '',
+                'operator' => self::OP_EQ,
+                'value' => null,
+            ]],
+            'then' => $dedupedThen !== [] ? $dedupedThen : [[
+                'action' => 'require',
+                'field_key' => null,
+                'block_index' => null,
+            ]],
+            'fallback' => $fallback,
+        ];
+    }
+
+    private static function normalizePageLogicClause(array $clauseRaw): array
+    {
+        $operator = (string) ($clauseRaw['operator'] ?? self::OP_EQ);
+
+        if (! in_array($operator, [
+            self::OP_EQ,
+            self::OP_NEQ,
+            self::OP_CONTAINS,
+            self::OP_NOT_CONTAINS,
+            'starts_with',
+            'not_starts_with',
+            'ends_with',
+            'not_ends_with',
+            'is_submitted',
+            'is_not_submitted',
+            'accepted',
+            'ignored',
+        ], true)) {
+            $operator = self::OP_EQ;
+        }
+
+        return [
+            'field_key' => self::normalizeKeyValue($clauseRaw['field_key'] ?? null, ''),
+            'operator' => $operator,
+            'value' => $clauseRaw['value'] ?? null,
+        ];
+    }
+
+    private static function normalizePageLogicThen(array $thenRaw): array
+    {
+        $action = (string) ($thenRaw['action'] ?? 'require');
+
+        if (! in_array($action, ['require', 'goto_block'], true)) {
+            $action = 'require';
+        }
+
+        return [
+            'action' => $action,
+            'field_key' => self::normalizeNullableString($thenRaw['field_key'] ?? null),
+            'block_index' => self::normalizeNullableBlockIndex($thenRaw['block_index'] ?? null),
+        ];
+    }
+
+    private static function normalizePageLogicFallback(mixed $fallback): array
+    {
+        if (! is_array($fallback)) {
+            return [
+                'action' => 'next',
+                'block_index' => null,
+            ];
+        }
+
+        $action = (string) ($fallback['action'] ?? 'next');
+
+        if (! in_array($action, ['next', 'goto_block'], true)) {
+            $action = 'next';
+        }
+
+        return [
+            'action' => $action,
+            'block_index' => self::normalizeNullableBlockIndex($fallback['block_index'] ?? null),
+        ];
+    }
+
+    private static function evaluatePageLogicClause(mixed $actual, string $operator, mixed $expected): bool
+    {
+        return match ($operator) {
+            self::OP_EQ => $actual === $expected,
+            self::OP_NEQ => $actual !== $expected,
+            self::OP_CONTAINS => is_string($actual) && is_string($expected) && str_contains($actual, $expected),
+            self::OP_NOT_CONTAINS => ! (is_string($actual) && is_string($expected) && str_contains($actual, $expected)),
+            'starts_with' => is_string($actual) && is_string($expected) && str_starts_with($actual, $expected),
+            'not_starts_with' => ! (is_string($actual) && is_string($expected) && str_starts_with($actual, $expected)),
+            'ends_with' => is_string($actual) && is_string($expected) && str_ends_with($actual, $expected),
+            'not_ends_with' => ! (is_string($actual) && is_string($expected) && str_ends_with($actual, $expected)),
+            'is_submitted' => ! self::isPageLogicEmpty($actual),
+            'is_not_submitted' => self::isPageLogicEmpty($actual),
+            'accepted' => $actual === true,
+            'ignored' => $actual !== true,
+            default => false,
+        };
+    }
+
     private static function applyAction(
         string $targetType,
         string $targetKey,
@@ -648,6 +980,23 @@ final class FormSchemaLayout
         return false;
     }
 
+    private static function isPageLogicEmpty(mixed $value): bool
+    {
+        if ($value === null || $value === '') {
+            return true;
+        }
+
+        if (is_string($value)) {
+            return trim($value) === '';
+        }
+
+        if (is_array($value)) {
+            return $value === [];
+        }
+
+        return false;
+    }
+
     private static function flattenFieldsFromPages(array $pages): array
     {
         $fields = [];
@@ -689,6 +1038,65 @@ final class FormSchemaLayout
         $value = trim($value);
 
         return $value === '' ? null : $value;
+    }
+
+    private static function sanitizeRichText(string $value): string
+    {
+        return RichTextSanitizer::sanitize($value);
+    }
+
+    private static function normalizeTemporalMode(string $mode): string
+    {
+        return in_array($mode, ['date', 'time'], true)
+            ? $mode
+            : 'date';
+    }
+
+    private static function defaultTemporalLabel(string $mode): string
+    {
+        return match (self::normalizeTemporalMode($mode)) {
+            'time' => 'Time',
+            default => 'Date',
+        };
+    }
+
+    private static function normalizeHourCycle(mixed $value): int
+    {
+        if (is_int($value) && in_array($value, [12, 24], true)) {
+            return $value;
+        }
+
+        return 24;
+    }
+
+    private static function normalizeNullableString(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $value = trim($value);
+
+        return $value === '' ? null : $value;
+    }
+
+    private static function normalizeNullableBlockIndex(mixed $value): ?int
+    {
+        if (! is_int($value) && ! is_string($value)) {
+            return null;
+        }
+
+        if (is_string($value)) {
+            $value = trim($value);
+
+            if ($value === '' || ! is_numeric($value)) {
+                return null;
+            }
+        }
+
+        $index = (int) $value;
+
+        return $index > 0 ? $index : null;
     }
 
     private static function normalizeKeyValue(mixed $value, string $fallback): string

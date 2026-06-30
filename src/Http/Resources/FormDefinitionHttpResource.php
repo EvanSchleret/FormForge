@@ -6,6 +6,7 @@ namespace EvanSchleret\FormForge\Http\Resources;
 
 use EvanSchleret\FormForge\Models\FormCategory;
 use EvanSchleret\FormForge\Models\FormDefinition;
+use EvanSchleret\FormForge\Support\FormPublicLinkResolver;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -57,6 +58,7 @@ class FormDefinitionHttpResource extends JsonResource
             'schema_hash' => (string) $definition->schema_hash,
             'schema' => $schema,
             'meta' => $meta,
+            'public_url' => $this->resolvePublicUrl($definition, $request),
             'created_by_type' => $definition->created_by_type,
             'created_by_id' => $definition->created_by_id,
             'updated_by_type' => $definition->updated_by_type,
@@ -78,5 +80,32 @@ class FormDefinitionHttpResource extends JsonResource
         $normalized = trim($value);
 
         return $normalized === '' ? null : $normalized;
+    }
+
+    private function resolvePublicUrl(FormDefinition $definition, Request $request): ?string
+    {
+        $configured = config('formforge.http.public_link.resolver');
+
+        if (! is_string($configured) || trim($configured) === '') {
+            return null;
+        }
+
+        if (! class_exists($configured) || ! is_subclass_of($configured, FormPublicLinkResolver::class)) {
+            return null;
+        }
+
+        $resolver = app($configured);
+
+        if (! $resolver instanceof FormPublicLinkResolver) {
+            return null;
+        }
+
+        return $resolver->resolve([
+            'key' => (string) $definition->key,
+            'owner_type' => $definition->owner_type,
+            'owner_id' => $definition->owner_id,
+            'schema' => $definition->schema,
+            'meta' => $definition->meta,
+        ], $request);
     }
 }

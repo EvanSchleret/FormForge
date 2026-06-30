@@ -18,6 +18,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Routing\RouteCollection;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
 it('exposes schema endpoints over HTTP', function (): void {
@@ -32,7 +33,7 @@ it('exposes schema endpoints over HTTP', function (): void {
         ->title('Schema')
         ->version('2')
         ->text('name')->required()
-        ->email('email')->required();
+        ->text('email')->required()->rules('email');
 
     $this->getJson("/api/formforge/v1/forms/{$key}")
         ->assertOk()
@@ -78,7 +79,7 @@ it('accepts field_key indexed submissions over HTTP', function (): void {
     Form::define($key)
         ->version('1')
         ->text('name')->required()
-        ->email('email')->required();
+        ->text('email')->required()->rules('email');
 
     $schema = Form::get($key, '1')->toArray();
     $nameField = collect($schema['fields'])->firstWhere('name', 'name');
@@ -514,6 +515,91 @@ it('blocks live submission for unpublished forms and allows test submissions', f
         ->assertJsonPath('data.meta.mode', 'test');
 });
 
+it('blocks live submission outside the configured availability window', function (): void {
+    config()->set('formforge.http.submission.require_published', false);
+
+    $futureCreate = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Future',
+        'publish_at' => Carbon::now()->addDay()->toIso8601String(),
+        'fields' => [
+            ['type' => 'text', 'name' => 'name', 'required' => true],
+        ],
+        'pages' => [],
+        'conditions' => [],
+    ])->assertCreated();
+
+    $futureKey = (string) $futureCreate->json('data.key');
+
+    $this->postJson("/api/formforge/v1/forms/{$futureKey}/submit", [
+        'name' => 'Future',
+    ])->assertStatus(422)
+        ->assertJsonValidationErrors('form');
+
+    $pausedCreate = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Paused',
+        'publish_at' => Carbon::now()->subDay()->toIso8601String(),
+        'pause_at' => Carbon::now()->subMinute()->toIso8601String(),
+        'fields' => [
+            ['type' => 'text', 'name' => 'name', 'required' => true],
+        ],
+        'pages' => [],
+        'conditions' => [],
+    ])->assertCreated();
+
+    $pausedKey = (string) $pausedCreate->json('data.key');
+
+    $this->postJson("/api/formforge/v1/forms/{$pausedKey}/submit", [
+        'name' => 'Paused',
+    ])->assertStatus(422)
+        ->assertJsonValidationErrors('form');
+});
+
+it('requires the submission code and closes after the response limit', function (): void {
+    config()->set('formforge.http.submission.require_published', false);
+
+    $create = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Protected',
+        'submission_code' => 'open-sesame',
+        'response_limit' => 1,
+        'fields' => [
+            ['type' => 'text', 'name' => 'name', 'required' => true],
+        ],
+        'pages' => [],
+        'conditions' => [],
+    ])->assertCreated();
+
+    $key = (string) $create->json('data.key');
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'name' => 'Denied',
+    ])->assertStatus(422)
+        ->assertJsonValidationErrors('form');
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'name' => 'Denied',
+        'meta' => [
+            'submission_code' => 'wrong-code',
+        ],
+    ])->assertStatus(422)
+        ->assertJsonValidationErrors('form');
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'name' => 'Allowed',
+        'meta' => [
+            'submission_code' => 'open-sesame',
+        ],
+    ])->assertCreated()
+        ->assertJsonPath('data.meta.submission_code_present', true);
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'name' => 'Closed',
+        'meta' => [
+            'submission_code' => 'open-sesame',
+        ],
+    ])->assertStatus(422)
+        ->assertJsonValidationErrors('form');
+});
+
 it('supports staged upload then JSON submit with upload_token', function (): void {
     Storage::fake('local');
 
@@ -613,6 +699,36 @@ it('creates a form revision through management endpoint', function (): void {
         ->assertJsonPath('data.title', 'Contact Form');
 });
 
+it('locks lifecycle settings when the form api declares settings locked', function (): void {
+    $response = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'System Form',
+        'publish_at' => '2026-01-01T08:00:00Z',
+        'pause_at' => '2026-01-31T18:00:00Z',
+        'response_limit' => 25,
+        'submission_code_required' => true,
+        'submission_code' => '1234',
+        'api' => [
+            'formforge' => [
+                'settings_locked' => true,
+            ],
+        ],
+        'fields' => [
+            [
+                'type' => 'text',
+                'name' => 'name',
+            ],
+        ],
+    ]);
+
+    $response
+        ->assertCreated()
+        ->assertJsonPath('data.schema.publish_at', null)
+        ->assertJsonPath('data.schema.pause_at', null)
+        ->assertJsonPath('data.schema.response_limit', null)
+        ->assertJsonPath('data.schema.submission_code_required', false)
+        ->assertJsonPath('data.schema.api.formforge.settings_locked', true);
+});
+
 it('lists forms through paginated management endpoint', function (): void {
     $surveyCategory = $this->postJson('/api/formforge/v1/categories', [
         'name' => 'Survey',
@@ -633,13 +749,13 @@ it('lists forms through paginated management endpoint', function (): void {
 
     $this->postJson('/api/formforge/v1/forms', [
         'title' => 'Form B',
-        'fields' => [['type' => 'email', 'name' => 'email']],
+        'fields' => [['type' => 'text', 'name' => 'email']],
         'category' => $contactCategoryKey,
     ])->assertCreated();
 
     $this->postJson('/api/formforge/v1/forms', [
         'title' => 'Form C',
-        'fields' => [['type' => 'textarea', 'name' => 'message']],
+        'fields' => [['type' => 'text', 'name' => 'message']],
         'category' => $surveyCategoryKey,
     ])->assertCreated();
 
@@ -700,7 +816,7 @@ it('filters forms by category slug on management endpoint', function (): void {
 
     $contactCreate = $this->postJson('/api/formforge/v1/forms', [
         'title' => 'Contact Form',
-        'fields' => [['type' => 'email', 'name' => 'email']],
+        'fields' => [['type' => 'text', 'name' => 'email']],
         'category' => $contactCategoryKey,
     ])->assertCreated();
 
@@ -913,7 +1029,7 @@ it('lists form responses through paginated management endpoint', function (): vo
     Form::define($key)
         ->version('1')
         ->text('name')->required()
-        ->email('email')->required();
+        ->text('email')->required()->rules('email');
 
     $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
         'name' => 'A',
@@ -1071,7 +1187,7 @@ it('configures form GDPR policy and runs GDPR engine through management endpoint
     Form::define($key)
         ->version('1')
         ->text('name')->required()
-        ->email('email')->required();
+        ->text('email')->required()->rules('email');
 
     $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
         'name' => 'Policy User',
@@ -1111,7 +1227,7 @@ it('anonymizes one response through management endpoint', function (): void {
     Form::define($key)
         ->version('1')
         ->text('name')->required()
-        ->email('email')->required();
+        ->text('email')->required()->rules('email');
 
     $submit = $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
         'name' => 'Target User',
@@ -1151,6 +1267,21 @@ it('creates a seeded draft form with default page and short_text field when empt
         ->assertJsonPath('data.schema.pages.0.fields.0.name', 'short_text');
 });
 
+it('exposes a generated public url on management responses', function (): void {
+    config()->set('formforge.http.public_link.base_url', 'https://forms.example.test');
+
+    $response = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Public Link Survey',
+        'fields' => [
+            ['type' => 'text', 'name' => 'name', 'required' => true],
+        ],
+    ]);
+
+    $response
+        ->assertCreated()
+        ->assertJsonPath('data.public_url', 'https://forms.example.test/api/formforge/v1/forms/' . $response->json('data.key'));
+});
+
 it('patches a form and creates a new draft revision', function (): void {
     $create = $this->postJson('/api/formforge/v1/forms', [
         'title' => 'Survey V1',
@@ -1165,7 +1296,7 @@ it('patches a form and creates a new draft revision', function (): void {
         'title' => 'Survey V2',
         'fields' => [
             ['type' => 'text', 'name' => 'name', 'required' => true],
-            ['type' => 'email', 'name' => 'email', 'required' => true],
+            ['type' => 'text', 'name' => 'email', 'required' => true],
         ],
     ]);
 
@@ -1210,7 +1341,7 @@ it('patches and auto publishes a form when requested', function (): void {
         'title' => 'Auto Published Patch V2',
         'fields' => [
             ['type' => 'text', 'name' => 'name', 'required' => true],
-            ['type' => 'email', 'name' => 'email', 'required' => true],
+            ['type' => 'text', 'name' => 'email', 'required' => true],
         ],
         'auto_publish' => true,
     ]);
@@ -1508,7 +1639,7 @@ it('returns a diff between two form versions', function (): void {
     $this->patchJson("/api/formforge/v1/forms/{$key}", [
         'fields' => [
             ['type' => 'text', 'name' => 'name', 'required' => true],
-            ['type' => 'email', 'name' => 'email', 'required' => true],
+            ['type' => 'text', 'name' => 'email', 'required' => true],
         ],
     ])->assertOk();
 
@@ -1528,7 +1659,7 @@ it('resolves effective schema over HTTP with conditional visibility', function (
                 'fields' => [
                     [
                         'field_key' => 'fk_has_company',
-                        'type' => 'checkbox',
+                        'type' => 'consent',
                         'name' => 'has_company',
                     ],
                     [
@@ -1575,6 +1706,168 @@ it('resolves effective schema over HTTP with conditional visibility', function (
         ->assertJsonPath('data.schema.debug.conditions.0.matched', true);
 });
 
+it('resolves and enforces block logic require actions over HTTP', function (): void {
+    $create = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Resolve Block Logic',
+        'pages' => [
+            [
+                'page_key' => 'pg_intro',
+                'title' => 'Intro',
+                'meta' => [
+                    'logic' => [
+                        'version' => 1,
+                        'rules' => [
+                            [
+                                'rule_key' => 'lr_require_company',
+                                'match' => 'all',
+                                'when' => [
+                                    [
+                                        'field_key' => 'fk_has_company',
+                                        'operator' => 'accepted',
+                                        'value' => null,
+                                    ],
+                                ],
+                                'then' => [
+                                    [
+                                        'action' => 'require',
+                                        'field_key' => 'fk_company_name',
+                                        'block_index' => 2,
+                                    ],
+                                ],
+                                'fallback' => [
+                                    'action' => 'next',
+                                    'block_index' => null,
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+                'fields' => [
+                    [
+                        'field_key' => 'fk_has_company',
+                        'type' => 'consent',
+                        'name' => 'has_company',
+                    ],
+                ],
+            ],
+            [
+                'page_key' => 'pg_company',
+                'title' => 'Company',
+                'fields' => [
+                    [
+                        'field_key' => 'fk_company_name',
+                        'type' => 'text',
+                        'name' => 'company_name',
+                    ],
+                ],
+            ],
+        ],
+        'drafts' => [
+            'enabled' => true,
+        ],
+    ])->assertCreated();
+
+    $key = (string) $create->json('data.key');
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/resolve", [
+        'payload' => [
+            'has_company' => true,
+        ],
+        'debug' => true,
+    ])
+        ->assertOk()
+        ->assertJsonPath('data.schema.pages.1.fields.0.required', true)
+        ->assertJsonPath('data.schema.debug.page_logic.0.matched', true);
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'has_company' => true,
+    ])->assertStatus(422);
+});
+
+it('supports address submission checks in block logic over HTTP', function (): void {
+    $create = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Resolve Address Block Logic',
+        'pages' => [
+            [
+                'page_key' => 'pg_intro',
+                'title' => 'Intro',
+                'meta' => [
+                    'logic' => [
+                        'version' => 1,
+                        'rules' => [
+                            [
+                                'rule_key' => 'lr_require_company',
+                                'match' => 'all',
+                                'when' => [
+                                    [
+                                        'field_key' => 'fk_address',
+                                        'operator' => 'is_not_submitted',
+                                        'value' => null,
+                                    ],
+                                ],
+                                'then' => [
+                                    [
+                                        'action' => 'require',
+                                        'field_key' => 'fk_company_name',
+                                        'block_index' => 2,
+                                    ],
+                                ],
+                                'fallback' => [
+                                    'action' => 'next',
+                                    'block_index' => null,
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+                'fields' => [
+                    [
+                        'field_key' => 'fk_address',
+                        'type' => 'address',
+                        'name' => 'address',
+                    ],
+                ],
+            ],
+            [
+                'page_key' => 'pg_company',
+                'title' => 'Company',
+                'fields' => [
+                    [
+                        'field_key' => 'fk_company_name',
+                        'type' => 'text',
+                        'name' => 'company_name',
+                    ],
+                ],
+            ],
+        ],
+        'drafts' => [
+            'enabled' => true,
+        ],
+    ])->assertCreated();
+
+    $key = (string) $create->json('data.key');
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/resolve", [
+        'payload' => [],
+        'debug' => true,
+    ])
+        ->assertOk()
+        ->assertJsonPath('data.schema.pages.1.fields.0.required', true)
+        ->assertJsonPath('data.schema.debug.page_logic.0.matched', true);
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/resolve", [
+        'payload' => [
+            'address' => [
+                'line1' => '1 Route des Acacias',
+            ],
+        ],
+        'debug' => true,
+    ])
+        ->assertOk()
+        ->assertJsonPath('data.schema.pages.1.fields.0.required', false)
+        ->assertJsonPath('data.schema.debug.page_logic.0.matched', false);
+});
+
 it('returns not found on resolve endpoint when environment is not allowed', function (): void {
     config()->set('formforge.http.resolve.enabled_environments', ['local']);
 
@@ -1594,11 +1887,11 @@ it('validates a single field over HTTP for latest and specific version', functio
 
     Form::define($key)
         ->version('1')
-        ->email('email')->required();
+        ->text('email')->required()->rules('email');
 
     Form::define($key)
         ->version('2')
-        ->email('email')->required();
+        ->text('email')->required()->rules('email');
 
     $this->postJson("/api/formforge/v1/forms/{$key}/validate-field", [
         'field' => 'email',
@@ -1625,7 +1918,7 @@ it('stores, reads and deletes authenticated draft states', function (): void {
     Form::define($key)
         ->version('1')
         ->text('name')
-        ->email('email');
+        ->text('email')->rules('email');
 
     $user = User::query()->create([
         'name' => 'Draft User',

@@ -126,6 +126,23 @@ class FormDefinitionRepository
             ->first();
     }
 
+    public function latestByUuid(string $formUuid, bool $includeDeleted = false, ?OwnershipReference $owner = null): ?FormDefinition
+    {
+        $query = $this->modelClass()::query()
+            ->where('form_uuid', $formUuid)
+            ->where('is_active', true);
+        $this->ownership()->applyScope($query, $owner);
+
+        if ($includeDeleted) {
+            $query->withTrashed();
+        }
+
+        return $query
+            ->orderByDesc('version_number')
+            ->orderByDesc('id')
+            ->first();
+    }
+
     public function all(?string $category = null, ?bool $published = null, bool $includeDeleted = false, ?OwnershipReference $owner = null): Collection
     {
         $query = $this->modelClass()::query()

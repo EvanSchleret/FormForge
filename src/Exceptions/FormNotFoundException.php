@@ -14,4 +14,9 @@ class FormNotFoundException extends FormForgeException
 
         return new self(trans('formforge::validation.form_version_not_found', ['key' => $key, 'version' => $version]));
     }
+
+    public static function forUuid(string $formUuid): self
+    {
+        return new self(trans('formforge::validation.form_not_found', ['key' => $formUuid]));
+    }
 }

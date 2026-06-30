@@ -3,7 +3,9 @@
 declare(strict_types=1);
 
 use EvanSchleret\FormForge\Exceptions\ImmutableVersionException;
+use EvanSchleret\FormForge\Exceptions\FormNotFoundException;
 use EvanSchleret\FormForge\Exceptions\UnknownFieldsException;
+use EvanSchleret\FormForge\Definition\FieldType;
 use EvanSchleret\FormForge\Facades\Form;
 use EvanSchleret\FormForge\FormManager;
 use EvanSchleret\FormForge\Models\FormCategory;
@@ -15,6 +17,7 @@ use EvanSchleret\FormForge\Models\StagedUpload;
 use EvanSchleret\FormForge\Automations\SubmissionAutomationDispatcher;
 use EvanSchleret\FormForge\Ownership\OwnershipReference;
 use EvanSchleret\FormForge\Registry\FormRegistry;
+use EvanSchleret\FormForge\Support\FormSchemaLayout;
 use EvanSchleret\FormForge\Tests\Fixtures\ActiveFormKeyAutomationResolver;
 use EvanSchleret\FormForge\Tests\Fixtures\CreateRecordFromSubmissionAutomation;
 use EvanSchleret\FormForge\Tests\Fixtures\Models\CustomFormSubmission;
@@ -36,13 +39,13 @@ it('exports a deterministic schema and keeps generated field_key stable across v
         ->title('Registration')
         ->version('1')
         ->text('name')->required()->max(120)
-        ->email('email')->required();
+        ->text('email')->required();
 
     Form::define($key)
         ->title('Registration')
         ->version('2')
         ->text('name')->required()->max(120)
-        ->email('email')->required();
+        ->text('email')->required();
 
     $schemaV1 = Form::get($key, '1')->toArray();
     $schemaV1Again = Form::get($key, '1')->toArray();
@@ -52,22 +55,32 @@ it('exports a deterministic schema and keeps generated field_key stable across v
     expect($schemaV1['fields'][0]['field_key'])->toBe($schemaV2['fields'][0]['field_key']);
 });
 
+it('sanitizes rich text field labels before exporting the schema', function (): void {
+    $key = 'rich_label_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')
+            ->label('<p>Hello <strong>World</strong><script>alert(1)</script><a href="javascript:alert(1)">Link</a></p>');
+
+    $schema = Form::get($key, '1')->toArray();
+
+    expect($schema['fields'][0]['label'])->toBe('<p>Hello <strong>World</strong><a>Link</a></p>');
+});
+
 it('treats nullish values as absent for optional fields', function (): void {
     $key = 'nullish_optional_' . Str::lower(Str::random(8));
 
     Form::define($key)
         ->version('1')
         ->text('name')
-        ->email('email')
-        ->dateRange('vacation');
+        ->text('email')
+        ->temporal('vacation', 'date');
 
     $submission = Form::get($key, '1')->submit([
         'name' => '',
         'email' => null,
-        'vacation' => [
-            'start' => null,
-            'end' => '',
-        ],
+        'vacation' => '',
     ]);
 
     expect($submission->payload)->toBe([]);
@@ -87,6 +100,195 @@ it('rejects nullish values when field is required', function (): void {
     expect(static fn () => Form::get($key, '1')->submit([
         'name' => '',
     ]))->toThrow(\Illuminate\Validation\ValidationException::class);
+});
+
+it('exports address fields and validates nested address rules', function (): void {
+    $key = 'address_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->address('address')->addressFields([
+            ['key' => 'line1', 'label' => 'Address Line 1', 'visible' => true, 'required' => true],
+            ['key' => 'line2', 'label' => 'Address Line 2', 'visible' => true, 'required' => false],
+            ['key' => 'city', 'label' => 'City', 'visible' => true, 'required' => false],
+            ['key' => 'state', 'label' => 'State', 'visible' => true, 'required' => false],
+            ['key' => 'zip', 'label' => 'Zip', 'visible' => true, 'required' => false],
+            ['key' => 'country', 'label' => 'Country', 'visible' => true, 'required' => false],
+        ])->meta([
+            'validation' => [
+                'match' => 'all',
+                'rules' => [
+                    [
+                        'validation_key' => 'vr_line1_min',
+                        'target' => 'line1',
+                        'operator' => 'min',
+                        'value' => 5,
+                        'unit' => 'characters',
+                    ],
+                ],
+            ],
+        ]);
+
+    $schema = Form::get($key, '1')->toArray();
+
+    expect($schema['fields'][0]['type'])->toBe(FieldType::ADDRESS);
+    expect($schema['fields'][0]['address_fields'])->toHaveCount(6);
+
+    expect(static fn () => Form::get($key, '1')->submit([
+        'address' => [
+            'line1' => '1234',
+            'line2' => null,
+            'city' => 'Geneva',
+            'state' => 'GE',
+            'zip' => '1200',
+            'country' => 'CH',
+        ],
+    ]))->toThrow(\Illuminate\Validation\ValidationException::class);
+
+    $submission = Form::get($key, '1')->submit([
+        'address' => [
+            'line1' => '1 Route des Acacias',
+            'line2' => null,
+            'city' => 'Geneva',
+            'state' => 'GE',
+            'zip' => '1200',
+            'country' => 'CH',
+        ],
+    ]);
+
+    expect($submission->payload['address']['line1'])->toBe('1 Route des Acacias');
+    expect($submission->payload['address']['city'])->toBe('Geneva');
+});
+
+it('exports translated default address labels according to the active locale', function (): void {
+    $key = 'address_locale_' . Str::lower(Str::random(8));
+
+    app()->setLocale('fr');
+
+    try {
+        Form::define($key)
+            ->version('1')
+            ->address('address');
+
+        $schema = Form::get($key, '1')->toArray();
+
+        expect($schema['fields'][0]['address_fields'])->toEqual([
+            ['key' => 'line1', 'label' => "Ligne d'adresse 1", 'visible' => true, 'required' => true],
+            ['key' => 'line2', 'label' => "Ligne d'adresse 2", 'visible' => false, 'required' => false],
+            ['key' => 'city', 'label' => 'Ville', 'visible' => true, 'required' => true],
+            ['key' => 'state', 'label' => 'État', 'visible' => false, 'required' => false],
+            ['key' => 'zip', 'label' => 'Code postal', 'visible' => true, 'required' => true],
+            ['key' => 'country', 'label' => 'Pays', 'visible' => true, 'required' => true],
+        ]);
+    } finally {
+        app()->setLocale('en');
+    }
+});
+
+it('preserves empty address field labels when exporting the schema', function (): void {
+    $key = 'address_empty_labels_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->address('address')
+        ->addressFields([
+            ['key' => 'line1', 'label' => '', 'visible' => true, 'required' => true],
+            ['key' => 'line2', 'label' => '', 'visible' => true, 'required' => false],
+            ['key' => 'city', 'label' => 'City', 'visible' => true, 'required' => true],
+            ['key' => 'state', 'label' => 'State', 'visible' => false, 'required' => false],
+            ['key' => 'zip', 'label' => 'Zip', 'visible' => true, 'required' => true],
+            ['key' => 'country', 'label' => 'Country', 'visible' => true, 'required' => true],
+        ]);
+
+    $schema = Form::get($key, '1')->toArray();
+
+    expect($schema['fields'][0]['address_fields'])->toEqual([
+        ['key' => 'line1', 'label' => '', 'visible' => true, 'required' => true],
+        ['key' => 'line2', 'label' => '', 'visible' => true, 'required' => false],
+        ['key' => 'city', 'label' => 'City', 'visible' => true, 'required' => true],
+        ['key' => 'state', 'label' => 'State', 'visible' => false, 'required' => false],
+        ['key' => 'zip', 'label' => 'Zip', 'visible' => true, 'required' => true],
+        ['key' => 'country', 'label' => 'Country', 'visible' => true, 'required' => true],
+    ]);
+});
+
+it('ignores top-level required on address fields and only enforces required address subfields', function (): void {
+    $key = 'address_required_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->address('address')
+            ->required()
+            ->addressFields([
+                ['key' => 'line1', 'label' => 'Address Line 1', 'visible' => true, 'required' => false],
+                ['key' => 'line2', 'label' => 'Address Line 2', 'visible' => true, 'required' => false],
+                ['key' => 'city', 'label' => 'City', 'visible' => true, 'required' => false],
+                ['key' => 'state', 'label' => 'State', 'visible' => true, 'required' => false],
+                ['key' => 'zip', 'label' => 'Zip', 'visible' => true, 'required' => false],
+                ['key' => 'country', 'label' => 'Country', 'visible' => true, 'required' => false],
+            ]);
+
+    $submission = Form::get($key, '1')->submit([
+        'address' => [
+            'line1' => null,
+            'line2' => null,
+            'city' => null,
+            'state' => null,
+            'zip' => null,
+            'country' => null,
+        ],
+    ]);
+
+    expect($submission->payload)->toBe([]);
+});
+
+it('exports temporal fields through the merged temporal type and keeps legacy schemas compatible', function (): void {
+    $key = 'temporal_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->temporal('travel', 'date');
+
+    $schema = Form::get($key, '1')->toArray();
+
+    expect($schema['fields'][0]['type'])->toBe(FieldType::TEMPORAL);
+    expect($schema['fields'][0]['temporal_mode'])->toBe('date');
+
+    $normalized = FormSchemaLayout::normalize([
+        'key' => $key,
+        'version' => '1',
+        'schema_version' => 2,
+        'title' => 'Temporal',
+        'fields' => [
+            [
+                'field_key' => 'fk_trip',
+                'type' => 'date',
+                'name' => 'trip',
+                'required' => false,
+                'nullable' => false,
+                'default' => null,
+                'rules' => [],
+                'meta' => [],
+            ],
+        ],
+    ]);
+
+    expect($normalized['fields'][0]['type'])->toBe(FieldType::TEMPORAL);
+    expect($normalized['fields'][0]['temporal_mode'])->toBe('date');
+});
+
+it('exports time temporal fields with a default 24-hour cycle', function (): void {
+    $key = 'time_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->temporal('meeting_time', 'time');
+
+    $schema = Form::get($key, '1')->toArray();
+
+    expect($schema['fields'][0]['type'])->toBe(FieldType::TEMPORAL);
+    expect($schema['fields'][0]['temporal_mode'])->toBe('time');
+    expect($schema['fields'][0]['hour_cycle'])->toBe(24);
 });
 
 it('syncs runtime definitions idempotently and enforces immutability', function (): void {
@@ -157,7 +359,7 @@ it('accepts field_key payloads and mixed payloads with name priority', function 
     Form::define($key)
         ->version('1')
         ->text('name')->required()
-        ->email('email')->required();
+        ->text('email')->required();
 
     $form = Form::get($key, '1');
     $schema = $form->toArray();
@@ -193,7 +395,7 @@ it('rejects payload conflicts when multiple aliases target the same field withou
             'name' => 'email',
             'field_key' => 'email_field_key',
             'key' => 'email_key',
-            'type' => 'email',
+            'type' => 'text',
             'rules' => ['required', 'email'],
         ]],
     ];
@@ -209,7 +411,7 @@ it('validates a single field through form methods', function (): void {
 
     Form::define($key)
         ->version('1')
-        ->email('email')->required();
+        ->text('email')->required()->rules('email');
 
     $form = Form::get($key, '1');
     $valid = $form->validateField('email', 'evan@example.com');
@@ -229,7 +431,7 @@ it('validates a single field through aliases', function (): void {
             'field_key' => ' email_field_key ',
             'key' => ' email_key ',
             'id' => ' email_id ',
-            'type' => 'email',
+            'type' => 'text',
             'rules' => ['required', 'email'],
         ]],
     ];
@@ -248,12 +450,190 @@ it('validates a single field through aliases', function (): void {
         ->toThrow(UnknownFieldsException::class);
 });
 
+it('stores field validation rules in the serialized schema', function (): void {
+    $key = 'validation_meta_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('nickname')
+        ->meta([
+            'validation' => [
+                'match' => 'all',
+                'rules' => [
+                    [
+                        'validation_key' => 'vr_min',
+                        'operator' => 'min',
+                        'value' => 3,
+                        'unit' => 'characters',
+                    ],
+                ],
+            ],
+        ]);
+
+    $schema = Form::get($key, '1')->toArray();
+    $validation = $schema['fields'][0]['meta']['validation'] ?? null;
+
+    expect($validation)->toBeArray();
+    expect($validation['match'])->toBe('all');
+    expect($validation['rules'])->toHaveCount(1);
+});
+
+it('validates field meta rules on the backend', function (): void {
+    $validator = app(SubmissionValidator::class);
+    $schema = [
+        'fields' => [[
+            'name' => 'nickname',
+            'field_key' => 'nickname_field_key',
+            'type' => 'text',
+            'required' => true,
+            'rules' => ['required', 'string'],
+            'meta' => [
+                'validation' => [
+                    'match' => 'all',
+                    'rules' => [
+                        [
+                            'validation_key' => 'vr_min',
+                            'operator' => 'min',
+                            'value' => 3,
+                            'unit' => 'characters',
+                        ],
+                        [
+                            'validation_key' => 'vr_max',
+                            'operator' => 'max',
+                            'value' => 8,
+                            'unit' => 'characters',
+                        ],
+                        [
+                            'validation_key' => 'vr_regex',
+                            'operator' => 'regex',
+                            'value' => '^[a-z]+$',
+                        ],
+                        [
+                            'validation_key' => 'vr_contains',
+                            'operator' => 'contains',
+                            'value' => 'abc',
+                        ],
+                        [
+                            'validation_key' => 'vr_not_contains',
+                            'operator' => 'not_contains',
+                            'value' => 'zzz',
+                        ],
+                        [
+                            'validation_key' => 'vr_eq',
+                            'operator' => 'eq',
+                            'value' => 'abcde',
+                        ],
+                        [
+                            'validation_key' => 'vr_neq',
+                            'operator' => 'neq',
+                            'value' => 'forbidden',
+                        ],
+                    ],
+                ],
+            ],
+        ]],
+    ];
+
+    $valid = $validator->validateField($schema, 'nickname', 'abcde');
+    $invalid = $validator->validateField($schema, 'nickname', 'abczzz');
+
+    expect($valid['valid'])->toBeTrue();
+    expect($valid['errors'])->toBe([]);
+    expect($invalid['valid'])->toBeFalse();
+    expect($invalid['errors'])->toHaveKey('nickname');
+});
+
+it('supports any-match field meta validation on the backend', function (): void {
+    $validator = app(SubmissionValidator::class);
+    $schema = [
+        'fields' => [[
+            'name' => 'nickname',
+            'field_key' => 'nickname_field_key',
+            'type' => 'text',
+            'required' => true,
+            'rules' => ['required', 'string'],
+            'meta' => [
+                'validation' => [
+                    'match' => 'any',
+                    'rules' => [
+                        [
+                            'validation_key' => 'vr_eq',
+                            'operator' => 'eq',
+                            'value' => 'alpha',
+                        ],
+                        [
+                            'validation_key' => 'vr_contains',
+                            'operator' => 'contains',
+                            'value' => 'beta',
+                        ],
+                    ],
+                ],
+            ],
+        ]],
+    ];
+
+    $accepted = $validator->validateField($schema, 'nickname', 'beta value');
+    $rejected = $validator->validateField($schema, 'nickname', 'gamma value');
+
+    expect($accepted['valid'])->toBeTrue();
+    expect($rejected['valid'])->toBeFalse();
+});
+
+it('validates temporal field meta rules on the backend', function (): void {
+    $validator = app(SubmissionValidator::class);
+    $schema = [
+        'fields' => [[
+            'name' => 'meeting',
+            'field_key' => 'meeting_field_key',
+            'type' => 'temporal',
+            'temporal_mode' => 'date',
+            'required' => true,
+            'rules' => ['required'],
+            'meta' => [
+                'validation' => [
+                    'match' => 'all',
+                    'rules' => [
+                        [
+                            'validation_key' => 'vr_after',
+                            'operator' => 'after',
+                            'value' => '2026-01-01',
+                        ],
+                        [
+                            'validation_key' => 'vr_before',
+                            'operator' => 'before',
+                            'value' => '2026-12-31',
+                        ],
+                        [
+                            'validation_key' => 'vr_between',
+                            'operator' => 'between',
+                            'value' => [
+                                'start' => '2026-03-01',
+                                'end' => '2026-09-30',
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]],
+    ];
+
+    $valid = $validator->validateField($schema, 'meeting', '2026-06-15');
+    $tooEarly = $validator->validateField($schema, 'meeting', '2025-12-31');
+    $tooLate = $validator->validateField($schema, 'meeting', '2027-01-01');
+    $outsideRange = $validator->validateField($schema, 'meeting', '2026-10-01');
+
+    expect($valid['valid'])->toBeTrue();
+    expect($tooEarly['valid'])->toBeFalse();
+    expect($tooLate['valid'])->toBeFalse();
+    expect($outsideRange['valid'])->toBeFalse();
+});
+
 it('describes fields with normalized descriptors', function (): void {
     $key = 'describe_fields_' . Str::lower(Str::random(8));
 
     Form::define($key)
         ->version('1')
-        ->select('country')->required()->options([
+        ->radio('country')->required()->options([
             ['label' => 'France', 'value' => 'fr'],
             ['label' => 'Switzerland', 'value' => 'ch'],
         ])
@@ -275,12 +655,126 @@ it('describes fields with normalized descriptors', function (): void {
     expect($nickname['options'])->toBe([]);
 });
 
+it('exports flattened exportable fields for simple and address fields', function (): void {
+    $key = 'exportable_fields_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('name')->label('Full name')->required()
+        ->address('address')->label('Mailing address')->addressFields([
+            ['key' => 'line1', 'label' => 'Address line 1', 'visible' => true, 'required' => true],
+            ['key' => 'line2', 'label' => 'Address line 2', 'visible' => false, 'required' => false],
+            ['key' => 'city', 'label' => 'City', 'visible' => true, 'required' => true],
+            ['key' => 'state', 'label' => 'State', 'visible' => false, 'required' => false],
+            ['key' => 'zip', 'label' => 'Postal code', 'visible' => true, 'required' => true],
+            ['key' => 'country', 'label' => 'Country', 'visible' => true, 'required' => true],
+        ]);
+
+    $fields = Form::get($key, '1')->exportableFields();
+    $paths = array_column($fields, 'path');
+    $name = collect($fields)->firstWhere('path', 'name');
+    $addressLine1 = collect($fields)->firstWhere('path', 'address.line1');
+    $addressLine2 = collect($fields)->firstWhere('path', 'address.line2');
+
+    expect($paths)->toBe([
+        'name',
+        'address.line1',
+        'address.city',
+        'address.zip',
+        'address.country',
+    ]);
+
+    expect($name)->not->toBeNull();
+    expect($name['label'])->toBe('Full name');
+    expect($name['type'])->toBe(FieldType::TEXT);
+    expect($name['required'])->toBeTrue();
+    expect($name['composite'])->toBeFalse();
+
+    expect($addressLine1)->not->toBeNull();
+    expect($addressLine1['id'])->toContain('.line1');
+    expect($addressLine1['label'])->toBe('Address line 1');
+    expect($addressLine1['type'])->toBe(FieldType::ADDRESS);
+    expect($addressLine1['required'])->toBeTrue();
+    expect($addressLine1['composite'])->toBeTrue();
+    expect($addressLine1['subfield'])->toBe([
+        'key' => 'line1',
+        'label' => 'Address line 1',
+        'required' => true,
+        'visible' => true,
+    ]);
+
+    expect($addressLine2)->toBeNull();
+});
+
+it('validates exportable headers and maps rows back to nested payloads', function (): void {
+    $key = 'exportable_headers_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->text('email')->required()
+        ->address('address')->addressFields([
+            ['key' => 'line1', 'label' => 'Address line 1', 'visible' => true, 'required' => true],
+            ['key' => 'line2', 'label' => 'Address line 2', 'visible' => false, 'required' => false],
+            ['key' => 'city', 'label' => 'City', 'visible' => true, 'required' => true],
+            ['key' => 'state', 'label' => 'State', 'visible' => false, 'required' => false],
+            ['key' => 'zip', 'label' => 'Postal code', 'visible' => true, 'required' => true],
+            ['key' => 'country', 'label' => 'Country', 'visible' => true, 'required' => true],
+        ]);
+
+    $form = Form::get($key, '1');
+
+    $valid = $form->validateExportableHeaders([
+        'email',
+        'address.line1',
+        'address.city',
+        'address.zip',
+        'address.country',
+    ]);
+
+    expect($valid['valid'])->toBeTrue();
+    expect($valid['missing'])->toBe([]);
+    expect($valid['unknown'])->toBe([]);
+
+    $invalid = $form->validateExportableHeaders([
+        'email',
+        'address.line1',
+        'address.zip',
+        'unexpected',
+    ]);
+
+    expect($invalid['valid'])->toBeFalse();
+    expect($invalid['missing'])->toBe([
+        'address.city',
+        'address.country',
+    ]);
+    expect($invalid['unknown'])->toBe(['unexpected']);
+
+    $mapped = $form->mapExportableRow([
+        'email' => 'evan@example.com',
+        'address.line1' => '1 Route des Acacias',
+        'address.city' => 'Geneva',
+        'address.zip' => '1200',
+        'address.country' => 'CH',
+        'unexpected' => 'ignored',
+    ], false);
+
+    expect($mapped)->toBe([
+        'email' => 'evan@example.com',
+        'address' => [
+            'line1' => '1 Route des Acacias',
+            'city' => 'Geneva',
+            'zip' => '1200',
+            'country' => 'CH',
+        ],
+    ]);
+});
+
 it('validates partial fields subset and reports canonical errors', function (): void {
     $key = 'validate_fields_subset_' . Str::lower(Str::random(8));
 
     Form::define($key)
         ->version('1')
-        ->email('email')->required()
+        ->text('email')->required()->rules('email')
         ->number('age')->required();
 
     $form = Form::get($key, '1');
@@ -311,7 +805,7 @@ it('validates partial fields with aliases and unresolved identifiers', function 
             'field_key' => 'email_field_key',
             'key' => 'email_key',
             'id' => 'email_id',
-            'type' => 'email',
+            'type' => 'text',
             'rules' => ['required', 'email'],
         ]],
     ];
@@ -330,7 +824,7 @@ it('ignores unknown payload keys in partial validation', function (): void {
     $schema = [
         'fields' => [[
             'name' => 'email',
-            'type' => 'email',
+            'type' => 'text',
             'rules' => ['required', 'email'],
         ]],
     ];
@@ -350,7 +844,7 @@ it('translates partial validation messages to french with explicit locale', func
     $schema = [
         'fields' => [[
             'name' => 'email',
-            'type' => 'email',
+            'type' => 'text',
             'rules' => ['required', 'email'],
         ]],
     ];
@@ -366,7 +860,7 @@ it('uses request query locale on the fly for validation messages', function (): 
     $schema = [
         'fields' => [[
             'name' => 'email',
-            'type' => 'email',
+            'type' => 'text',
             'rules' => ['required', 'email'],
         ]],
     ];
@@ -384,7 +878,7 @@ it('uses request header locale and falls back to english for unsupported locales
     $schema = [
         'fields' => [[
             'name' => 'email',
-            'type' => 'email',
+            'type' => 'text',
             'rules' => ['required', 'email'],
         ]],
     ];
@@ -400,20 +894,20 @@ it('uses request header locale and falls back to english for unsupported locales
     expect((string) ($fallback['errors']['missing_alias'][0] ?? ''))->toBe('Unknown field identifier.');
 });
 
-it('normalizes primitive and date range values before persistence', function (): void {
+it('normalizes primitive and temporal values before persistence', function (): void {
     $key = 'normalize_' . Str::lower(Str::random(8));
 
     Form::define($key)
         ->version('1')
         ->number('age')->required()
         ->number('price')->required()
-        ->checkbox('newsletter')->required()
-        ->switch('active')->required()
+        ->addField(FieldType::CONSENT, 'newsletter')->required()
+        ->addField(FieldType::CONSENT, 'active')->required()
         ->date('birthday')->required()
         ->time('meeting_time')->required()
-        ->datetime('meeting_at')->required()
-        ->dateRange('vacation')->required()
-        ->datetimeRange('window')->required();
+        ->temporal('meeting_at', 'time')->required()
+        ->temporal('vacation', 'date')->required()
+        ->temporal('window', 'time')->required();
 
     $submission = Form::get($key, '1')->submit([
         'age' => '42',
@@ -422,15 +916,9 @@ it('normalizes primitive and date range values before persistence', function ():
         'active' => true,
         'birthday' => '2026-01-05',
         'meeting_time' => '09:10:11',
-        'meeting_at' => '2026-01-05T09:10:11+00:00',
-        'vacation' => [
-            'start' => '2026-08-01',
-            'end' => '2026-08-10',
-        ],
-        'window' => [
-            'start' => '2026-01-05T09:10:11+00:00',
-            'end' => '2026-01-05T10:10:11+00:00',
-        ],
+        'meeting_at' => '09:10:11',
+        'vacation' => '2026-08-01',
+        'window' => '10:10:11',
     ]);
 
     expect($submission->payload['age'])->toBe(42);
@@ -439,12 +927,30 @@ it('normalizes primitive and date range values before persistence', function ():
     expect($submission->payload['active'])->toBeTrue();
     expect($submission->payload['birthday'])->toBe('2026-01-05');
     expect($submission->payload['meeting_time'])->toBe('09:10:11');
-    expect($submission->payload['meeting_at'])->toContain('2026-01-05T09:10:11');
-    expect($submission->payload['vacation'])->toBe([
-        'start' => '2026-08-01',
-        'end' => '2026-08-10',
+    expect($submission->payload['meeting_at'])->toBe('09:10:11');
+    expect($submission->payload['vacation'])->toBe('2026-08-01');
+    expect($submission->payload['window'])->toBe('10:10:11');
+});
+
+it('validates date boundaries for date fields', function (): void {
+    $key = 'date_bounds_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->date('birthday')
+        ->required()
+        ->min('2026-01-01')
+        ->max('2026-12-31');
+
+    $submission = Form::get($key, '1')->submit([
+        'birthday' => '2026-06-15',
     ]);
-    expect($submission->payload['window']['start'])->toContain('2026-01-05T09:10:11');
+
+    expect($submission->payload['birthday'])->toBe('2026-06-15');
+
+    expect(static fn () => Form::get($key, '1')->submit([
+        'birthday' => '2025-12-31',
+    ]))->toThrow(\Illuminate\Validation\ValidationException::class);
 });
 
 it('stores uploaded files and persists normalized metadata in managed mode', function (): void {
@@ -558,7 +1064,7 @@ it('runs code-first submission automations after form submit', function (): void
 
     Form::define($key)
         ->version('1')
-        ->email('email')->required()
+        ->text('email')->required()->rules('email')
         ->text('plan')->required();
 
     $submission = Form::get($key, '1')->submit([
@@ -602,12 +1108,12 @@ it('runs resolver-based submission automations using runtime form resolution', f
 
     Form::define($firstKey)
         ->version('1')
-        ->email('email')->required()
+        ->text('email')->required()->rules('email')
         ->text('plan')->required();
 
     Form::define($secondKey)
         ->version('1')
-        ->email('email')->required()
+        ->text('email')->required()->rules('email')
         ->text('plan')->required();
 
     config()->set('formforge.tests.active_form_key', $firstKey);
@@ -879,6 +1385,126 @@ it('scopes management mutations and reads through Form::for owner API', function
     expect($latestB)->toBeNull();
 });
 
+it('resolves the latest active form by uuid across versions', function (): void {
+    $formUuid = (string) Str::uuid();
+    $key = 'uuid_latest_' . Str::lower(Str::random(8));
+
+    $createDefinition = function (
+        string $version,
+        int $versionNumber,
+        bool $active = true,
+        ?string $ownerType = null,
+        ?string $ownerId = null,
+    ) use ($formUuid, $key): FormDefinition {
+        $schema = [
+            'key' => $key,
+            'version' => $version,
+            'schema_version' => 2,
+            'title' => 'UUID latest ' . $version,
+            'fields' => [],
+        ];
+
+        return FormDefinition::query()->create([
+            'key' => $key,
+            'form_uuid' => $formUuid,
+            'revision_id' => (string) Str::ulid(),
+            'version' => $version,
+            'version_number' => $versionNumber,
+            'title' => 'UUID latest ' . $version,
+            'schema' => $schema,
+            'schema_hash' => hash('sha256', json_encode($schema) ?: ''),
+            'is_active' => $active,
+            'is_published' => true,
+            'owner_type' => $ownerType,
+            'owner_id' => $ownerId,
+        ]);
+    };
+
+    $createDefinition('1', 1);
+    $createDefinition('2', 2);
+    $createDefinition('3', 3);
+    $createDefinition('3b', 3);
+    $createDefinition('4', 4, false);
+
+    $latest = Form::latestByUuid($formUuid);
+
+    expect($latest->version())->toBe('3b');
+    expect($latest->key())->toBe($key);
+});
+
+it('resolves the latest active form by uuid through the scoped owner API', function (): void {
+    $formUuid = (string) Str::uuid();
+    $key = 'uuid_scoped_' . Str::lower(Str::random(8));
+    $ownerA = ['type' => 'user', 'id' => '101'];
+    $ownerB = ['type' => 'user', 'id' => '202'];
+
+    $schema = static fn (string $version) => [
+        'key' => $key,
+        'version' => $version,
+        'schema_version' => 2,
+        'title' => 'Scoped UUID ' . $version,
+        'fields' => [],
+    ];
+
+    FormDefinition::query()->create([
+        'key' => $key,
+        'form_uuid' => $formUuid,
+        'revision_id' => (string) Str::ulid(),
+        'version' => '1',
+        'version_number' => 1,
+        'title' => 'Scoped UUID 1',
+        'schema' => $schema('1'),
+        'schema_hash' => hash('sha256', json_encode($schema('1')) ?: ''),
+        'is_active' => true,
+        'is_published' => true,
+        'owner_type' => $ownerA['type'],
+        'owner_id' => $ownerA['id'],
+    ]);
+
+    FormDefinition::query()->create([
+        'key' => $key,
+        'form_uuid' => $formUuid,
+        'revision_id' => (string) Str::ulid(),
+        'version' => '2',
+        'version_number' => 2,
+        'title' => 'Scoped UUID 2',
+        'schema' => $schema('2'),
+        'schema_hash' => hash('sha256', json_encode($schema('2')) ?: ''),
+        'is_active' => true,
+        'is_published' => true,
+        'owner_type' => $ownerA['type'],
+        'owner_id' => $ownerA['id'],
+    ]);
+
+    FormDefinition::query()->create([
+        'key' => $key,
+        'form_uuid' => $formUuid,
+        'revision_id' => (string) Str::ulid(),
+        'version' => '3b',
+        'version_number' => 3,
+        'title' => 'Scoped UUID 3b',
+        'schema' => $schema('3b'),
+        'schema_hash' => hash('sha256', json_encode($schema('3b')) ?: ''),
+        'is_active' => true,
+        'is_published' => true,
+        'owner_type' => $ownerB['type'],
+        'owner_id' => $ownerB['id'],
+    ]);
+
+    $latestA = Form::for($ownerA)->latestByUuid($formUuid);
+    $latestB = Form::for($ownerB)->latestByUuid($formUuid);
+
+    expect($latestA->version)->toBe('2');
+    expect($latestB->version)->toBe('3b');
+});
+
+it('throws when no form exists for a uuid lookup', function (): void {
+    $missing = (string) Str::uuid();
+
+    expect(static fn () => Form::latestByUuid($missing))
+        ->toThrow(FormNotFoundException::class);
+});
+
 it('exports submissions through facade in csv and jsonl formats', function (): void {
     $key = 'exports_facade_' . Str::lower(Str::random(8));
 
@@ -992,7 +1618,7 @@ it('applies form-level GDPR policy through facade run', function (): void {
     Form::define($key)
         ->version('1')
         ->text('name')->required()
-        ->email('email')->required();
+        ->text('email')->required()->rules('email');
 
     Form::get($key, '1')->submit([
         'name' => 'Sensitive',
@@ -1025,7 +1651,7 @@ it('applies GDPR action immediately for one response through facade', function (
     Form::define($key)
         ->version('1')
         ->text('name')->required()
-        ->email('email')->required();
+        ->text('email')->required()->rules('email');
 
     $submission = Form::get($key, '1')->submit([
         'name' => 'One-off',

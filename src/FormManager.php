@@ -182,6 +182,17 @@ class FormManager
         return $this->submissionExports->exportToPath($path, $formKey, $format, $filters, null, $withHeader);
     }
 
+    public function latestByUuid(string $formUuid): FormInstance
+    {
+        $persisted = $this->repository->latestByUuid($formUuid);
+
+        if ($persisted !== null) {
+            return $this->newInstance((array) $persisted->schema);
+        }
+
+        throw FormNotFoundException::forUuid($formUuid);
+    }
+
     public function validateField(string $formKey, string $field, mixed $value, ?string $version = null, ?string $locale = null): array
     {
         return $this->get($formKey, $version)->validateField($field, $value, $locale);
@@ -190,6 +201,31 @@ class FormManager
     public function describeFields(string $formKey, ?string $version = null): array
     {
         return $this->get($formKey, $version)->describeFields();
+    }
+
+    public function exportableFields(string $formKey, ?string $version = null): array
+    {
+        return $this->get($formKey, $version)->exportableFields();
+    }
+
+    public function flattenExportableFields(string $formKey, ?string $version = null): array
+    {
+        return $this->get($formKey, $version)->flattenExportableFields();
+    }
+
+    public function resolveExportableField(string $formKey, string $identifier, ?string $version = null): ?array
+    {
+        return $this->get($formKey, $version)->resolveExportableField($identifier);
+    }
+
+    public function validateExportableHeaders(string $formKey, array $headers, ?string $version = null): array
+    {
+        return $this->get($formKey, $version)->validateExportableHeaders($headers);
+    }
+
+    public function mapExportableRow(string $formKey, array $row, ?string $version = null, bool $strict = true): array
+    {
+        return $this->get($formKey, $version)->mapExportableRow($row, $strict);
     }
 
     public function resolveField(string $formKey, string $identifier, ?string $version = null): ?array
