@@ -111,8 +111,9 @@ class ApiBlueprint
     private function normalizeConfig(array $config): array
     {
         $normalized = [];
+        $knownEndpoints = ['schema', 'submission', 'upload'];
 
-        foreach (['schema', 'submission', 'upload'] as $endpoint) {
+        foreach ($knownEndpoints as $endpoint) {
             $endpointConfig = $config[$endpoint] ?? [];
 
             if (! is_array($endpointConfig)) {
@@ -140,6 +141,14 @@ class ApiBlueprint
             if ($entry !== []) {
                 $normalized[$endpoint] = $entry;
             }
+        }
+
+        foreach ($config as $key => $value) {
+            if (in_array($key, $knownEndpoints, true)) {
+                continue;
+            }
+
+            $normalized[$key] = $value;
         }
 
         return $normalized;

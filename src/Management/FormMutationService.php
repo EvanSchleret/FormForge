@@ -20,6 +20,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 class FormMutationService
@@ -43,6 +44,10 @@ class FormMutationService
             : null;
         $api = $this->normalizedArray($input['api'] ?? []);
         $meta = $this->normalizedArray($input['meta'] ?? []);
+        $settingsLocked = $this->resolveSettingsLocked($input);
+        [$meta, $submissionCodeRequired] = $this->resolveSubmissionCodeMeta($input, $meta, null, $settingsLocked);
+        [$publishAt, $pauseAt, $responseLimit] = $this->resolveLifecycleSettings($input, null, $settingsLocked);
+        $meta = $this->sanitizeSettingsMeta($meta, $settingsLocked);
         $key = $this->buildGeneratedKey();
         $versionNumber = 1;
         $formUuid = $key;
@@ -57,6 +62,11 @@ class FormMutationService
             drafts: $drafts,
             category: $categoryModel?->key,
             api: $api,
+            publishAt: $publishAt,
+            pauseAt: $pauseAt,
+            responseLimit: $responseLimit,
+            submissionCodeRequired: $submissionCodeRequired,
+            settingsLocked: $settingsLocked,
             published: false,
         );
 
@@ -113,6 +123,10 @@ class FormMutationService
         $meta = array_key_exists('meta', $input)
             ? $this->normalizedArray($input['meta'])
             : $this->normalizedArray($latest->meta ?? []);
+        $settingsLocked = $this->resolveSettingsLocked($input, $currentSchema);
+        [$meta, $submissionCodeRequired] = $this->resolveSubmissionCodeMeta($input, $meta, $currentSchema, $settingsLocked);
+        [$publishAt, $pauseAt, $responseLimit] = $this->resolveLifecycleSettings($input, $currentSchema, $settingsLocked);
+        $meta = $this->sanitizeSettingsMeta($meta, $settingsLocked);
 
         $schema = $this->normalizeSchema(
             key: $key,
@@ -124,6 +138,11 @@ class FormMutationService
             drafts: $drafts,
             category: $categoryModel?->key,
             api: $api,
+            publishAt: $publishAt,
+            pauseAt: $pauseAt,
+            responseLimit: $responseLimit,
+            submissionCodeRequired: $submissionCodeRequired,
+            settingsLocked: $settingsLocked,
             published: false,
         );
 
@@ -154,6 +173,7 @@ class FormMutationService
         $title = trim((string) ($currentSchema['title'] ?? ''));
         $pages = $this->normalizedArray($currentSchema['pages'] ?? []);
         $fields = $currentSchema['fields'] ?? [];
+        $settingsLocked = $this->resolveSettingsLocked([], $currentSchema);
 
         if (! $this->isPublishable($title, $pages, $fields)) {
             throw new FormForgeException('Form cannot be published: title, at least one page, and one field are required.');
@@ -173,10 +193,17 @@ class FormMutationService
             drafts: $this->normalizedArray($currentSchema['drafts'] ?? []),
             category: $categoryModel?->key,
             api: $this->normalizedArray($currentSchema['api'] ?? []),
+            publishAt: $currentSchema['publish_at'] ?? null,
+            pauseAt: $currentSchema['pause_at'] ?? null,
+            responseLimit: $currentSchema['response_limit'] ?? null,
+            submissionCodeRequired: (bool) ($currentSchema['submission_code_required'] ?? false),
+            settingsLocked: $settingsLocked,
             published: true,
         );
 
-        return DB::transaction(function () use ($latest, $schema, $nextVersion, $actor, $categoryModel, $effectiveOwner): FormDefinition {
+        $meta = $this->sanitizeSettingsMeta($this->normalizedArray($latest->meta ?? []), $settingsLocked);
+
+        return DB::transaction(function () use ($latest, $schema, $nextVersion, $actor, $categoryModel, $effectiveOwner, $meta): FormDefinition {
             return $this->createRevision(
                 key: (string) $latest->key,
                 schema: $schema,
@@ -184,7 +211,7 @@ class FormMutationService
                 versionNumber: $nextVersion,
                 published: true,
                 actor: $actor,
-                meta: $this->normalizedArray($latest->meta ?? []),
+                meta: $meta,
                 category: $categoryModel,
                 owner: $effectiveOwner,
             );
@@ -202,6 +229,7 @@ class FormMutationService
         $currentSchema = is_array($latest->schema) ? $latest->schema : [];
         $effectiveOwner = $owner ?? $this->ownership->fromModel($latest);
         $nextVersion = $this->repository->nextVersionNumber($key, true, $effectiveOwner);
+        $settingsLocked = $this->resolveSettingsLocked([], $currentSchema);
 
         $categoryModel = $this->resolveCurrentCategoryModel($latest, $currentSchema, $effectiveOwner);
         $schema = $this->normalizeSchema(
@@ -214,10 +242,17 @@ class FormMutationService
             drafts: $this->normalizedArray($currentSchema['drafts'] ?? []),
             category: $categoryModel?->key,
             api: $this->normalizedArray($currentSchema['api'] ?? []),
+            publishAt: $currentSchema['publish_at'] ?? null,
+            pauseAt: $currentSchema['pause_at'] ?? null,
+            responseLimit: $currentSchema['response_limit'] ?? null,
+            submissionCodeRequired: (bool) ($currentSchema['submission_code_required'] ?? false),
+            settingsLocked: $settingsLocked,
             published: false,
         );
 
-        return DB::transaction(function () use ($latest, $schema, $nextVersion, $actor, $categoryModel, $effectiveOwner): FormDefinition {
+        $meta = $this->sanitizeSettingsMeta($this->normalizedArray($latest->meta ?? []), $settingsLocked);
+
+        return DB::transaction(function () use ($latest, $schema, $nextVersion, $actor, $categoryModel, $effectiveOwner, $meta): FormDefinition {
             return $this->createRevision(
                 key: (string) $latest->key,
                 schema: $schema,
@@ -225,7 +260,7 @@ class FormMutationService
                 versionNumber: $nextVersion,
                 published: false,
                 actor: $actor,
-                meta: $this->normalizedArray($latest->meta ?? []),
+                meta: $meta,
                 category: $categoryModel,
                 owner: $effectiveOwner,
             );
@@ -477,6 +512,11 @@ class FormMutationService
         mixed $drafts,
         ?string $category,
         array $api,
+        mixed $publishAt,
+        mixed $pauseAt,
+        mixed $responseLimit,
+        bool $submissionCodeRequired,
+        bool $settingsLocked,
         bool $published,
     ): array {
         if ($title === '') {
@@ -518,6 +558,7 @@ class FormMutationService
         $schema = [
             'key' => $key,
             'version' => (string) $versionNumber,
+            'schema_version' => FormSchemaLayout::LATEST_SCHEMA_VERSION,
             'title' => $title,
             'fields' => $normalizedFields,
             'is_published' => $published,
@@ -541,6 +582,18 @@ class FormMutationService
         $normalized['drafts'] = $drafts;
         $normalized = FormSchemaLayout::normalize($normalized);
         $normalized['is_published'] = $published;
+
+        if ($settingsLocked) {
+            $normalized['publish_at'] = null;
+            $normalized['pause_at'] = null;
+            $normalized['response_limit'] = null;
+            $normalized['submission_code_required'] = false;
+        } else {
+            $normalized['publish_at'] = $this->normalizedDateTime($publishAt);
+            $normalized['pause_at'] = $this->normalizedDateTime($pauseAt);
+            $normalized['response_limit'] = $this->normalizedResponseLimit($responseLimit);
+            $normalized['submission_code_required'] = $submissionCodeRequired;
+        }
 
         return $normalized;
     }
@@ -671,6 +724,149 @@ class FormMutationService
     private function normalizedArray(mixed $value): array
     {
         return is_array($value) ? $value : [];
+    }
+
+    private function normalizedDateTime(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (! is_string($value)) {
+            $value = (string) $value;
+        }
+
+        $value = trim($value);
+
+        if ($value === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($value)->toIso8601String();
+        } catch (\Throwable) {
+            throw new FormForgeException('Invalid form date value provided.');
+        }
+    }
+
+    private function normalizedResponseLimit(mixed $value): ?int
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (is_string($value)) {
+            $value = trim($value);
+
+            if ($value === '') {
+                return null;
+            }
+        }
+
+        if (! is_numeric($value)) {
+            throw new FormForgeException('Response limit must be numeric.');
+        }
+
+        $limit = (int) $value;
+
+        if ($limit <= 0) {
+            throw new FormForgeException('Response limit must be greater than zero.');
+        }
+
+        return $limit;
+    }
+
+    private function resolveLifecycleSettings(array $input, ?array $currentSchema = null, bool $settingsLocked = false): array
+    {
+        if ($settingsLocked) {
+            return [null, null, null];
+        }
+
+        $publishAt = array_key_exists('publish_at', $input)
+            ? $input['publish_at']
+            : ($currentSchema['publish_at'] ?? null);
+
+        $pauseAt = array_key_exists('pause_at', $input)
+            ? $input['pause_at']
+            : ($currentSchema['pause_at'] ?? null);
+
+        $responseLimit = array_key_exists('response_limit', $input)
+            ? $input['response_limit']
+            : ($currentSchema['response_limit'] ?? null);
+
+        return [$publishAt, $pauseAt, $responseLimit];
+    }
+
+    /**
+     * @return array{0: array, 1: bool}
+     */
+    private function resolveSubmissionCodeMeta(array $input, array $meta, ?array $currentSchema = null, bool $settingsLocked = false): array
+    {
+        if ($settingsLocked) {
+            unset($meta['submission_code_hash']);
+
+            return [$meta, false];
+        }
+
+        $requiredOverride = array_key_exists('submission_code_required', $input)
+            ? (bool) $input['submission_code_required']
+            : null;
+
+        if (array_key_exists('submission_code', $input)) {
+            $submissionCode = trim((string) $input['submission_code']);
+
+            if ($submissionCode === '') {
+                unset($meta['submission_code_hash']);
+
+                return [$meta, false];
+            }
+
+            $meta['submission_code_hash'] = Hash::make($submissionCode);
+
+            return [$meta, true];
+        }
+
+        if ($requiredOverride === false) {
+            unset($meta['submission_code_hash']);
+
+            return [$meta, false];
+        }
+
+        $required = (bool) ($currentSchema['submission_code_required'] ?? false);
+
+        if (! $required && is_string($meta['submission_code_hash'] ?? null) && trim((string) $meta['submission_code_hash']) !== '') {
+            $required = true;
+        }
+
+        return [$meta, $required];
+    }
+
+    private function sanitizeSettingsMeta(array $meta, bool $settingsLocked): array
+    {
+        if ($settingsLocked) {
+            unset($meta['submission_code_hash']);
+        }
+
+        return $meta;
+    }
+
+    private function resolveSettingsLocked(array $input, ?array $currentSchema = null): bool
+    {
+        $inputApi = array_key_exists('api', $input)
+            ? $this->normalizedArray($input['api'])
+            : [];
+        $currentApi = $currentSchema !== null
+            ? $this->normalizedArray($currentSchema['api'] ?? [])
+            : [];
+
+        return $this->settingsLockedFromApi($inputApi) || $this->settingsLockedFromApi($currentApi);
+    }
+
+    private function settingsLockedFromApi(array $api): bool
+    {
+        $formforge = $this->normalizedArray($api['formforge'] ?? []);
+
+        return ($formforge['settings_locked'] ?? null) === true;
     }
 
     private function normalizedOptionalString(mixed $value): ?string

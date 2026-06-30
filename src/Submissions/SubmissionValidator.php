@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace EvanSchleret\FormForge\Submissions;
 
+use Closure;
 use EvanSchleret\FormForge\Definition\FieldType;
 use EvanSchleret\FormForge\Exceptions\FormForgeException;
 use EvanSchleret\FormForge\Exceptions\UnknownFieldsException;
+use EvanSchleret\FormForge\Support\FormSchemaExportableFields;
 use EvanSchleret\FormForge\Support\ValidationLocaleResolver;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 
@@ -17,6 +20,31 @@ class SubmissionValidator
     public function __construct(
         private readonly ValidationLocaleResolver $localeResolver = new ValidationLocaleResolver(),
     ) {
+    }
+
+    public function exportableFields(array $schema): array
+    {
+        return FormSchemaExportableFields::exportableFields($schema);
+    }
+
+    public function flattenExportableFields(array $schema): array
+    {
+        return FormSchemaExportableFields::flattenExportableFields($schema);
+    }
+
+    public function resolveExportableField(array $schema, string $identifier): ?array
+    {
+        return FormSchemaExportableFields::resolveExportableField($schema, $identifier);
+    }
+
+    public function validateExportableHeaders(array $schema, array $headers): array
+    {
+        return FormSchemaExportableFields::validateExportableHeaders($schema, $headers);
+    }
+
+    public function mapExportableRow(array $schema, array $row, bool $strict = true): array
+    {
+        return FormSchemaExportableFields::mapExportableRow($schema, $row, $strict);
     }
 
     public function describeFields(array $schema): array
@@ -53,9 +81,11 @@ class SubmissionValidator
                 'id' => $id,
                 'label' => $label,
                 'type' => $type,
+                'temporal_mode' => $this->nullableTrimmed($field['temporal_mode'] ?? null),
                 'required' => (bool) ($field['required'] ?? false),
                 'rules' => $this->normalizeRules($field['rules'] ?? []),
                 'options' => $this->normalizeOptions($field['options'] ?? []),
+                'meta' => is_array($field['meta'] ?? null) ? $field['meta'] : [],
                 'default' => $field['default'] ?? null,
                 'lookup_keys' => $this->lookupKeys($name, $fieldKey, $key, $id),
             ];
@@ -373,7 +403,7 @@ class SubmissionValidator
             }
 
             $name = (string) ($field['name'] ?? '');
-            $type = (string) ($field['type'] ?? '');
+            $type = FieldType::normalize((string) ($field['type'] ?? ''));
 
             if ($name === '' || $type === '') {
                 continue;
@@ -381,8 +411,10 @@ class SubmissionValidator
 
             $baseRules = $this->normalizeRules($field['rules'] ?? []);
 
-            if (FieldType::isRange($type)) {
-                $this->compileRangeRules($rules, $name, $type, $field, $baseRules);
+            $temporalMode = (string) ($field['temporal_mode'] ?? FieldType::temporalMode((string) ($field['type'] ?? '')) ?? 'date');
+
+            if ($type === FieldType::ADDRESS) {
+                $this->compileAddressRules($rules, $name, $field, $baseRules);
                 continue;
             }
 
@@ -396,37 +428,390 @@ class SubmissionValidator
                 continue;
             }
 
+            if ($this->supportsMetaValidation($type, $temporalMode)) {
+                $baseRules = array_merge($baseRules, $this->compileMetaValidationRules($field, $temporalMode));
+            }
+
             $rules[$name] = $baseRules;
         }
 
         return $rules;
     }
 
-    private function compileRangeRules(array &$rules, string $name, string $type, array $field, array $baseRules): void
+    private function compileAddressRules(array &$rules, string $name, array $field, array $baseRules): void
     {
         if (! in_array('array', $baseRules, true)) {
             $baseRules[] = 'array';
         }
 
-        $rules[$name] = $baseRules;
-
-        $required = (bool) ($field['required'] ?? false);
-        $format = $type === FieldType::DATE_RANGE ? 'date_format:Y-m-d' : 'date';
-
-        $leafRules = [];
-
-        if ($required) {
-            $leafRules[] = 'required';
+        if ($this->supportsMetaValidation((string) ($field['type'] ?? ''))) {
+            $baseRules = array_merge($baseRules, $this->compileMetaValidationRules($field));
         }
 
-        $leafRules[] = $format;
+        $rules[$name] = $baseRules;
 
-        $rules[$name . '.start'] = $leafRules;
+        $addressFields = $this->normalizeAddressFields($field['address_fields'] ?? null);
 
-        $endRules = [...$leafRules];
-        $endRules[] = 'after_or_equal:' . $name . '.start';
+        foreach ($addressFields as $addressField) {
+            if (! ($addressField['visible'] ?? true)) {
+                continue;
+            }
 
-        $rules[$name . '.end'] = $endRules;
+            $subKey = trim((string) ($addressField['key'] ?? ''));
+
+            if ($subKey === '') {
+                continue;
+            }
+
+            $subRules = ((bool) ($addressField['required'] ?? false))
+                ? ['required', 'string']
+                : ['nullable', 'string'];
+
+            $rules[$name . '.' . $subKey] = $subRules;
+        }
+    }
+
+    private function supportsMetaValidation(string $type, ?string $temporalMode = null): bool
+    {
+        if ($type === FieldType::TEXT || $type === FieldType::ADDRESS) {
+            return true;
+        }
+
+        if ($type !== FieldType::TEMPORAL || ! is_string($temporalMode)) {
+            return false;
+        }
+
+        return in_array($temporalMode, ['date', 'time'], true);
+    }
+
+    private function compileMetaValidationRules(array $field, ?string $temporalMode = null): array
+    {
+        $validation = $this->metaValidationConfig($field);
+
+        if ($validation === null) {
+            return [];
+        }
+
+        $fieldType = (string) ($field['type'] ?? '');
+
+        return [function (string $attribute, mixed $value, Closure $fail) use ($validation, $fieldType, $field, $temporalMode): void {
+            if ($fieldType !== FieldType::ADDRESS && $fieldType !== FieldType::TEMPORAL && ! is_string($value)) {
+                return;
+            }
+
+            $results = [];
+
+            foreach ($validation['rules'] as $rule) {
+                $expectedValue = $value;
+
+                if ($fieldType === FieldType::ADDRESS) {
+                    $expectedValue = $this->addressRuleValue($value, $rule['target'] ?? null);
+                } elseif ($fieldType === FieldType::TEMPORAL) {
+                    $result = $this->evaluateTemporalMetaValidationRule($value, $rule, (string) ($temporalMode ?? 'date'));
+
+                    if ($result !== null) {
+                        $results[] = $result;
+                    }
+
+                    continue;
+                }
+
+                $result = $this->evaluateMetaValidationRule($expectedValue, $rule);
+
+                if ($result !== null) {
+                    $results[] = $result;
+                }
+            }
+
+            if ($results === []) {
+                return;
+            }
+
+            $matched = $validation['match'] === 'any'
+                ? in_array(true, $results, true)
+                : ! in_array(false, $results, true);
+
+            if (! $matched) {
+                $fail(trans('formforge::validation.field_validation_failed'));
+            }
+        }];
+    }
+
+    private function metaValidationConfig(array $field): ?array
+    {
+        $meta = $field['meta'] ?? null;
+
+        if (! is_array($meta)) {
+            return null;
+        }
+
+        $validation = $meta['validation'] ?? null;
+
+        if (! is_array($validation)) {
+            return null;
+        }
+
+        $match = $validation['match'] ?? null;
+        if (! in_array($match, ['all', 'any'], true)) {
+            return null;
+        }
+
+        $rules = $validation['rules'] ?? null;
+        if (! is_array($rules) || $rules === []) {
+            return null;
+        }
+
+        $normalizedRules = [];
+
+        foreach ($rules as $rule) {
+            if (! is_array($rule)) {
+                continue;
+            }
+
+            $operator = trim((string) ($rule['operator'] ?? ''));
+            $validationKey = trim((string) ($rule['validation_key'] ?? ''));
+
+            if ($validationKey === '' || ! in_array($operator, ['min', 'max', 'after', 'before', 'between', 'not_between', 'regex', 'eq', 'neq', 'contains', 'not_contains'], true)) {
+                continue;
+            }
+
+            $normalizedRules[] = [
+                'validation_key' => $validationKey,
+                'target' => isset($rule['target']) ? $this->nullableTrimmed($rule['target']) : null,
+                'operator' => $operator,
+                'value' => $rule['value'] ?? null,
+                'unit' => $rule['unit'] ?? null,
+            ];
+        }
+
+        if ($normalizedRules === []) {
+            return null;
+        }
+
+        return [
+            'match' => $match,
+            'rules' => $normalizedRules,
+        ];
+    }
+
+    private function evaluateMetaValidationRule(mixed $value, array $rule): ?bool
+    {
+        $operator = (string) ($rule['operator'] ?? '');
+        $expected = $rule['value'] ?? null;
+
+        if (! is_string($value)) {
+            return null;
+        }
+
+        if ($operator === 'min') {
+            return $this->stringLength($value) >= $this->ruleNumberValue($expected, 0);
+        }
+
+        if ($operator === 'max') {
+            return $this->stringLength($value) <= $this->ruleNumberValue($expected, 0);
+        }
+
+        if ($operator === 'eq') {
+            return $value === $this->ruleStringValue($expected);
+        }
+
+        if ($operator === 'neq') {
+            return $value !== $this->ruleStringValue($expected);
+        }
+
+        if ($operator === 'contains') {
+            return str_contains($value, $this->ruleStringValue($expected));
+        }
+
+        if ($operator === 'not_contains') {
+            return ! str_contains($value, $this->ruleStringValue($expected));
+        }
+
+        if ($operator === 'regex') {
+            $pattern = $this->compileRegexPattern($this->ruleStringValue($expected));
+
+            if ($pattern === null) {
+                return null;
+            }
+
+            $result = @preg_match($pattern, $value);
+
+            if ($result === false) {
+                return null;
+            }
+
+            return $result === 1;
+        }
+
+        return null;
+    }
+
+    private function evaluateTemporalMetaValidationRule(mixed $value, array $rule, string $temporalMode): ?bool
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $operator = (string) ($rule['operator'] ?? '');
+        $expected = $rule['value'] ?? null;
+
+        $actualComparable = $this->temporalComparableValue($value, $temporalMode);
+
+        if ($actualComparable === null) {
+            return null;
+        }
+
+        if ($operator === 'between' || $operator === 'not_between') {
+            $range = $this->temporalValidationRangeValue($expected);
+
+            if ($range === null) {
+                return null;
+            }
+
+            $startComparable = $this->temporalComparableValue($range['start'], $temporalMode);
+            $endComparable = $this->temporalComparableValue($range['end'], $temporalMode);
+
+            if ($startComparable === null || $endComparable === null) {
+                return null;
+            }
+
+            $isBetween = $actualComparable >= $startComparable && $actualComparable <= $endComparable;
+
+            return $operator === 'between' ? $isBetween : ! $isBetween;
+        }
+
+        $expectedComparable = $this->temporalComparableValue($this->ruleStringValue($expected), $temporalMode);
+
+        if ($expectedComparable === null) {
+            return null;
+        }
+
+        if ($operator === 'after') {
+            return $actualComparable > $expectedComparable;
+        }
+
+        if ($operator === 'before') {
+            return $actualComparable < $expectedComparable;
+        }
+
+        if ($operator === 'min') {
+            return $actualComparable >= $expectedComparable;
+        }
+
+        if ($operator === 'max') {
+            return $actualComparable <= $expectedComparable;
+        }
+
+        if ($operator === 'eq') {
+            return $actualComparable === $expectedComparable;
+        }
+
+        if ($operator === 'neq') {
+            return $actualComparable !== $expectedComparable;
+        }
+
+        return null;
+    }
+
+    private function addressRuleValue(mixed $value, mixed $target): mixed
+    {
+        if (! is_array($value) || ! is_string($target) || $target === '') {
+            return null;
+        }
+
+        return $value[$target] ?? null;
+    }
+
+    private function temporalValidationRangeValue(mixed $value): ?array
+    {
+        if (is_array($value)) {
+            return [
+                'start' => isset($value['start']) ? $this->ruleStringValue($value['start']) : '',
+                'end' => isset($value['end']) ? $this->ruleStringValue($value['end']) : '',
+            ];
+        }
+
+        return null;
+    }
+
+    private function temporalComparableValue(string $value, string $temporalMode): ?int
+    {
+        $trimmed = trim($value);
+
+        if ($trimmed === '') {
+            return null;
+        }
+
+        if ($temporalMode === 'time') {
+            if (! preg_match('/^(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/', $trimmed, $matches)) {
+                return null;
+            }
+
+            $hours = (int) ($matches[1] ?? 0);
+            $minutes = (int) ($matches[2] ?? 0);
+            $seconds = (int) ($matches[3] ?? 0);
+            $milliseconds = (int) str_pad((string) ($matches[4] ?? '0'), 3, '0');
+
+            return ((($hours * 60) + $minutes) * 60 + $seconds) * 1000 + $milliseconds;
+        }
+
+        if (! preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $trimmed, $matches)) {
+            return null;
+        }
+
+        try {
+            $date = Carbon::createFromFormat('Y-m-d', sprintf('%04d-%02d-%02d', (int) $matches[1], (int) $matches[2], (int) $matches[3]), 'UTC');
+
+            return ($date->getTimestamp() * 1000) + intdiv((int) $date->format('u'), 1000);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private function ruleStringValue(mixed $value): string
+    {
+        if (is_string($value)) {
+            return $value;
+        }
+
+        if (is_int($value) || is_float($value) || is_bool($value)) {
+            return (string) $value;
+        }
+
+        return '';
+    }
+
+    private function ruleNumberValue(mixed $value, int|float $fallback): int|float
+    {
+        if (is_int($value) || is_float($value)) {
+            return $value;
+        }
+
+        if (is_string($value)) {
+            $trimmed = trim($value);
+
+            if ($trimmed !== '' && is_numeric($trimmed)) {
+                return str_contains($trimmed, '.') ? (float) $trimmed : (int) $trimmed;
+            }
+        }
+
+        return $fallback;
+    }
+
+    private function stringLength(string $value): int
+    {
+        return function_exists('mb_strlen') ? mb_strlen($value) : strlen($value);
+    }
+
+    private function compileRegexPattern(string $pattern): ?string
+    {
+        foreach (['~', '#', '%', '!', '@', '/'] as $delimiter) {
+            if (! str_contains($pattern, $delimiter)) {
+                return $delimiter . $pattern . $delimiter . 'u';
+            }
+        }
+
+        return null;
     }
 
     private function compileOptionRules(array &$rules, string $name, string $type, array $field, array $baseRules): void
@@ -578,6 +963,52 @@ class SubmissionValidator
         return array_values($options);
     }
 
+    private function normalizeAddressFields(mixed $addressFields): array
+    {
+        $defaults = [
+            ['key' => 'line1', 'label' => trans('formforge::messages.address_line1'), 'visible' => true, 'required' => false],
+            ['key' => 'line2', 'label' => trans('formforge::messages.address_line2'), 'visible' => true, 'required' => false],
+            ['key' => 'city', 'label' => trans('formforge::messages.address_city'), 'visible' => true, 'required' => false],
+            ['key' => 'state', 'label' => trans('formforge::messages.address_state'), 'visible' => true, 'required' => false],
+            ['key' => 'zip', 'label' => trans('formforge::messages.address_zip'), 'visible' => true, 'required' => false],
+            ['key' => 'country', 'label' => trans('formforge::messages.address_country'), 'visible' => true, 'required' => false],
+        ];
+
+        if (! is_array($addressFields) || $addressFields === []) {
+            return $defaults;
+        }
+
+        $normalized = [];
+
+        foreach ($addressFields as $index => $addressField) {
+            if (! is_array($addressField)) {
+                continue;
+            }
+
+            $key = trim((string) ($addressField['key'] ?? ''));
+            $hasLabel = array_key_exists('label', $addressField)
+                && (is_string($addressField['label']) || $addressField['label'] === null);
+            $label = $hasLabel ? trim((string) $addressField['label']) : '';
+
+            if ($key === '') {
+                $key = (string) ($defaults[$index]['key'] ?? "field_{$index}");
+            }
+
+            if (! $hasLabel) {
+                $label = (string) ($defaults[$index]['label'] ?? $key);
+            }
+
+            $normalized[] = [
+                'key' => $key,
+                'label' => $label,
+                'visible' => (bool) ($addressField['visible'] ?? true),
+                'required' => (bool) ($addressField['required'] ?? false),
+            ];
+        }
+
+        return $normalized === [] ? $defaults : $normalized;
+    }
+
     private function lookupKeys(string $name, ?string $fieldKey, ?string $key, ?string $id): array
     {
         $values = [$name, $fieldKey, $key, $id];
@@ -606,7 +1037,15 @@ class SubmissionValidator
             $name = (string) ($field['name'] ?? '');
             $required = (bool) ($field['required'] ?? false);
 
+            if ((string) ($field['type'] ?? '') === FieldType::ADDRESS) {
+                $required = $this->hasRequiredAddressField($field);
+            }
+
             if ($name === '' || $required || ! array_key_exists($name, $payload)) {
+                continue;
+            }
+
+            if ($this->hasRequiredAddressField($field) && $this->isNullishOptionalValue($payload[$name])) {
                 continue;
             }
 
@@ -616,6 +1055,27 @@ class SubmissionValidator
         }
 
         return $payload;
+    }
+
+    private function hasRequiredAddressField(array $field): bool
+    {
+        if ((string) ($field['type'] ?? '') !== FieldType::ADDRESS) {
+            return false;
+        }
+
+        $addressFields = $this->normalizeAddressFields($field['address_fields'] ?? null);
+
+        foreach ($addressFields as $addressField) {
+            if (! ($addressField['visible'] ?? true)) {
+                continue;
+            }
+
+            if ((bool) ($addressField['required'] ?? false)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function isNullishOptionalValue(mixed $value): bool

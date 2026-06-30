@@ -311,6 +311,10 @@ return [
                 'key' => env('FORMFORGE_HTTP_FILE_URL_KEY', 'url'),
             ],
         ],
+        'public_link' => [
+            'resolver' => \EvanSchleret\FormForge\Support\DefaultFormPublicLinkResolver::class,
+            'base_url' => env('FORMFORGE_HTTP_PUBLIC_LINK_BASE_URL', null),
+        ],
         'idempotency' => [
             'ttl_minutes' => env('FORMFORGE_HTTP_IDEMPOTENCY_TTL', 1440),
         ],

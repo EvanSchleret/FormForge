@@ -44,6 +44,17 @@ class ScopedFormManager
         return $this->repository->latestActive($key, $includeDeleted, $this->owner);
     }
 
+    public function latestByUuid(string $formUuid, bool $includeDeleted = false): FormDefinition
+    {
+        $definition = $this->repository->latestByUuid($formUuid, $includeDeleted, $this->owner);
+
+        if ($definition instanceof FormDefinition) {
+            return $definition;
+        }
+
+        throw \EvanSchleret\FormForge\Exceptions\FormNotFoundException::forUuid($formUuid);
+    }
+
     public function versions(string $key, bool $includeDeleted = false): array
     {
         return $this->repository->versions($key, $includeDeleted, $this->owner);
@@ -147,6 +158,81 @@ class ScopedFormManager
         $schema = is_array($definition->schema) ? $definition->schema : [];
 
         return $this->submissionService->describeFields($schema);
+    }
+
+    public function exportableFields(string $formKey, ?string $version = null): array
+    {
+        $definition = $version === null
+            ? $this->latestActive($formKey)
+            : $this->find($formKey, $version);
+
+        if (! $definition instanceof FormDefinition) {
+            throw \EvanSchleret\FormForge\Exceptions\FormNotFoundException::forKey($formKey, $version);
+        }
+
+        $schema = is_array($definition->schema) ? $definition->schema : [];
+
+        return $this->submissionService->exportableFields($schema);
+    }
+
+    public function flattenExportableFields(string $formKey, ?string $version = null): array
+    {
+        $definition = $version === null
+            ? $this->latestActive($formKey)
+            : $this->find($formKey, $version);
+
+        if (! $definition instanceof FormDefinition) {
+            throw \EvanSchleret\FormForge\Exceptions\FormNotFoundException::forKey($formKey, $version);
+        }
+
+        $schema = is_array($definition->schema) ? $definition->schema : [];
+
+        return $this->submissionService->flattenExportableFields($schema);
+    }
+
+    public function resolveExportableField(string $formKey, string $identifier, ?string $version = null): ?array
+    {
+        $definition = $version === null
+            ? $this->latestActive($formKey)
+            : $this->find($formKey, $version);
+
+        if (! $definition instanceof FormDefinition) {
+            throw \EvanSchleret\FormForge\Exceptions\FormNotFoundException::forKey($formKey, $version);
+        }
+
+        $schema = is_array($definition->schema) ? $definition->schema : [];
+
+        return $this->submissionService->resolveExportableField($schema, $identifier);
+    }
+
+    public function validateExportableHeaders(string $formKey, array $headers, ?string $version = null): array
+    {
+        $definition = $version === null
+            ? $this->latestActive($formKey)
+            : $this->find($formKey, $version);
+
+        if (! $definition instanceof FormDefinition) {
+            throw \EvanSchleret\FormForge\Exceptions\FormNotFoundException::forKey($formKey, $version);
+        }
+
+        $schema = is_array($definition->schema) ? $definition->schema : [];
+
+        return $this->submissionService->validateExportableHeaders($schema, $headers);
+    }
+
+    public function mapExportableRow(string $formKey, array $row, ?string $version = null, bool $strict = true): array
+    {
+        $definition = $version === null
+            ? $this->latestActive($formKey)
+            : $this->find($formKey, $version);
+
+        if (! $definition instanceof FormDefinition) {
+            throw \EvanSchleret\FormForge\Exceptions\FormNotFoundException::forKey($formKey, $version);
+        }
+
+        $schema = is_array($definition->schema) ? $definition->schema : [];
+
+        return $this->submissionService->mapExportableRow($schema, $row, $strict);
     }
 
     public function resolveField(string $formKey, string $identifier, ?string $version = null): ?array

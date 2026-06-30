@@ -7,6 +7,7 @@ namespace EvanSchleret\FormForge\Tests;
 use EvanSchleret\FormForge\FormForgeServiceProvider;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use Mews\Purifier\PurifierServiceProvider;
 use Orchestra\Testbench\TestCase as Orchestra;
 
 abstract class TestCase extends Orchestra
@@ -15,6 +16,7 @@ abstract class TestCase extends Orchestra
     {
         return [
             FormForgeServiceProvider::class,
+            PurifierServiceProvider::class,
         ];
     }
 

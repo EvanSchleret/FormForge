@@ -16,6 +16,8 @@ class FormBlueprint
 
     private ?string $version = null;
 
+    private int $schemaVersion = FormSchemaLayout::LATEST_SCHEMA_VERSION;
+
     private array $fields = [];
 
     private array $api = [];
@@ -46,6 +48,12 @@ class FormBlueprint
 
         if (isset($schema['version'])) {
             $form->version((string) $schema['version']);
+        }
+
+        if (array_key_exists('schema_version', $schema)) {
+            $form->schemaVersion((int) $schema['schema_version']);
+        } else {
+            $form->schemaVersion(1);
         }
 
         if (isset($schema['category'])) {
@@ -114,6 +122,17 @@ class FormBlueprint
         return $this;
     }
 
+    public function schemaVersion(int $schemaVersion): self
+    {
+        if ($schemaVersion <= 0) {
+            throw new InvalidFieldDefinitionException('Form schema version must be positive.');
+        }
+
+        $this->schemaVersion = $schemaVersion;
+
+        return $this;
+    }
+
     public function category(string $category): self
     {
         $category = trim($category);
@@ -146,29 +165,9 @@ class FormBlueprint
         return $this->addField(FieldType::TEXT, $name);
     }
 
-    public function textarea(string $name): FieldBlueprint
-    {
-        return $this->addField(FieldType::TEXTAREA, $name);
-    }
-
-    public function email(string $name): FieldBlueprint
-    {
-        return $this->addField(FieldType::EMAIL, $name);
-    }
-
     public function number(string $name): FieldBlueprint
     {
         return $this->addField(FieldType::NUMBER, $name);
-    }
-
-    public function select(string $name): FieldBlueprint
-    {
-        return $this->addField(FieldType::SELECT, $name);
-    }
-
-    public function selectMenu(string $name): FieldBlueprint
-    {
-        return $this->addField(FieldType::SELECT_MENU, $name);
     }
 
     public function radio(string $name): FieldBlueprint
@@ -176,49 +175,34 @@ class FormBlueprint
         return $this->addField(FieldType::RADIO, $name);
     }
 
-    public function checkbox(string $name): FieldBlueprint
-    {
-        return $this->addField(FieldType::CHECKBOX, $name);
-    }
-
     public function checkboxGroup(string $name): FieldBlueprint
     {
         return $this->addField(FieldType::CHECKBOX_GROUP, $name);
     }
 
-    public function switch(string $name): FieldBlueprint
+    public function temporal(string $name, string $mode = 'date'): FieldBlueprint
     {
-        return $this->addField(FieldType::SWITCH, $name);
+        return $this->addField(FieldType::TEMPORAL, $name)->temporalModeValue($mode);
     }
 
     public function date(string $name): FieldBlueprint
     {
-        return $this->addField(FieldType::DATE, $name);
+        return $this->temporal($name, 'date');
     }
 
     public function time(string $name): FieldBlueprint
     {
-        return $this->addField(FieldType::TIME, $name);
-    }
-
-    public function datetime(string $name): FieldBlueprint
-    {
-        return $this->addField(FieldType::DATETIME, $name);
-    }
-
-    public function dateRange(string $name): FieldBlueprint
-    {
-        return $this->addField(FieldType::DATE_RANGE, $name);
-    }
-
-    public function datetimeRange(string $name): FieldBlueprint
-    {
-        return $this->addField(FieldType::DATETIME_RANGE, $name);
+        return $this->temporal($name, 'time');
     }
 
     public function file(string $name): FieldBlueprint
     {
         return $this->addField(FieldType::FILE, $name);
+    }
+
+    public function address(string $name): FieldBlueprint
+    {
+        return $this->addField(FieldType::ADDRESS, $name);
     }
 
     public function api(callable|array $config): self
@@ -268,6 +252,11 @@ class FormBlueprint
     public function versionValue(): ?string
     {
         return $this->version;
+    }
+
+    public function schemaVersionValue(): int
+    {
+        return $this->schemaVersion;
     }
 
     public function titleValue(): string
@@ -344,6 +333,7 @@ class FormBlueprint
         $schema = [
             'key' => $this->key,
             'version' => $this->version,
+            'schema_version' => $this->schemaVersion,
             'title' => $this->titleValue(),
             'fields' => $fields,
         ];

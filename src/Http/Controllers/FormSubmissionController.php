@@ -8,15 +8,26 @@ use EvanSchleret\FormForge\Exceptions\FormForgeException;
 use EvanSchleret\FormForge\Exceptions\FormNotFoundException;
 use EvanSchleret\FormForge\FormInstance;
 use EvanSchleret\FormForge\FormManager;
+use EvanSchleret\FormForge\Ownership\OwnershipReference;
+use EvanSchleret\FormForge\Persistence\FormDefinitionRepository;
 use EvanSchleret\FormForge\Http\Resources\SubmissionHttpResource;
+use EvanSchleret\FormForge\Submissions\SubmissionReadService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Hash;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class FormSubmissionController
 {
-    public function submitLatest(Request $request, FormManager $forms, SubmissionHttpResource $resources): JsonResponse
+    public function submitLatest(
+        Request $request,
+        FormManager $forms,
+        SubmissionHttpResource $resources,
+        FormDefinitionRepository $definitions,
+        SubmissionReadService $submissions,
+    ): JsonResponse
     {
         $key = $this->routeRequired($request, 'key');
         $version = $request->input('version');
@@ -25,21 +36,29 @@ class FormSubmissionController
             $version = null;
         }
 
-        return $this->submit($request, $forms, $resources, $key, $version);
+        return $this->submit($request, $forms, $resources, $definitions, $submissions, $key, $version);
     }
 
-    public function submitVersion(Request $request, FormManager $forms, SubmissionHttpResource $resources): JsonResponse
+    public function submitVersion(
+        Request $request,
+        FormManager $forms,
+        SubmissionHttpResource $resources,
+        FormDefinitionRepository $definitions,
+        SubmissionReadService $submissions,
+    ): JsonResponse
     {
         $key = $this->routeRequired($request, 'key');
         $version = $this->routeRequired($request, 'version');
 
-        return $this->submit($request, $forms, $resources, $key, $version);
+        return $this->submit($request, $forms, $resources, $definitions, $submissions, $key, $version);
     }
 
     private function submit(
         Request $request,
         FormManager $forms,
         SubmissionHttpResource $resources,
+        FormDefinitionRepository $definitions,
+        SubmissionReadService $submissions,
         string $key,
         ?string $version,
     ): JsonResponse
@@ -51,15 +70,16 @@ class FormSubmissionController
                 $form = $forms->get($key, $version);
             }
 
+            $submissionCode = $this->resolveSubmissionCode($request);
             $isTest = $this->resolveTestMode($request);
-            $this->assertSubmissionAllowed($form, $isTest);
+            $this->assertSubmissionAllowed($form, $definitions, $submissions, $request, $submissionCode, $isTest);
 
             $submission = $form->submit(
                 payload: $this->extractPayload($request),
                 submittedBy: $request->user(),
                 request: $request,
                 isTest: $isTest,
-                submissionMeta: $this->extractSubmissionMeta($request, $isTest),
+                submissionMeta: $this->extractSubmissionMeta($request, $isTest, $submissionCode),
             );
         } catch (FormNotFoundException $exception) {
             throw new NotFoundHttpException($exception->getMessage(), $exception);
@@ -89,6 +109,8 @@ class FormSubmissionController
                 }
             }
 
+            unset($merged['submission_code']);
+
             $flag = trim((string) config('formforge.submissions.testing.flag', '_formforge_test'));
 
             if ($flag !== '') {
@@ -100,6 +122,7 @@ class FormSubmissionController
 
         $all = $request->all();
         unset($all['version'], $all['payload'], $all['meta']);
+        unset($all['submission_code']);
 
         $flag = trim((string) config('formforge.submissions.testing.flag', '_formforge_test'));
 
@@ -153,8 +176,60 @@ class FormSubmissionController
         return $resolved && $enabled;
     }
 
-    private function assertSubmissionAllowed(FormInstance $form, bool $isTest): void
+    private function assertSubmissionAllowed(
+        FormInstance $form,
+        FormDefinitionRepository $definitions,
+        SubmissionReadService $submissions,
+        Request $request,
+        ?string $submissionCode,
+        bool $isTest,
+    ): void
     {
+        $owner = $request->attributes->get('formforge.ownership.reference');
+        $ownerReference = $owner instanceof OwnershipReference ? $owner : null;
+        $definition = $definitions->find($form->key(), $form->version(), null, null, true, $ownerReference);
+
+        $now = Carbon::now();
+
+        $publishAt = $form->publishAt();
+        if ($publishAt instanceof Carbon && $now->lt($publishAt)) {
+            throw ValidationException::withMessages([
+                'form' => [trans('formforge::messages.form_not_available_yet')],
+            ]);
+        }
+
+        $pauseAt = $form->pauseAt();
+        if ($pauseAt instanceof Carbon && $now->greaterThanOrEqualTo($pauseAt)) {
+            throw ValidationException::withMessages([
+                'form' => [trans('formforge::messages.form_paused')],
+            ]);
+        }
+
+        $responseLimit = $form->responseLimit();
+        if ($responseLimit !== null) {
+            $currentResponses = $submissions->queryForForm($form->key(), ['is_test' => false], $ownerReference)->count();
+
+            if ($currentResponses >= $responseLimit) {
+                throw ValidationException::withMessages([
+                    'form' => [trans('formforge::messages.form_response_limit_reached')],
+                ]);
+            }
+        }
+
+        if ($form->submissionCodeRequired()) {
+            $codeHash = null;
+
+            if ($definition !== null && is_array($definition->meta ?? null)) {
+                $codeHash = $definition->meta['submission_code_hash'] ?? null;
+            }
+
+            if (! is_string($codeHash) || trim($codeHash) === '' || $submissionCode === null || ! Hash::check($submissionCode, $codeHash)) {
+                throw ValidationException::withMessages([
+                    'form' => [trans('formforge::messages.form_submission_code_invalid')],
+                ]);
+            }
+        }
+
         $requiresPublished = (bool) config('formforge.http.submission.require_published', true);
 
         if (! $requiresPublished || $form->isPublished()) {
@@ -172,7 +247,7 @@ class FormSubmissionController
         ]);
     }
 
-    private function extractSubmissionMeta(Request $request, bool $isTest): array
+    private function extractSubmissionMeta(Request $request, bool $isTest, ?string $submissionCode = null): array
     {
         $meta = $request->input('meta');
 
@@ -180,10 +255,37 @@ class FormSubmissionController
             $meta = [];
         }
 
+        unset($meta['submission_code']);
+
+        if ($submissionCode !== null && $submissionCode !== '') {
+            $meta['submission_code_present'] = true;
+        }
+
         $meta['mode'] = $isTest ? 'test' : 'live';
         $meta['channel'] = 'http';
 
         return $meta;
+    }
+
+    private function resolveSubmissionCode(Request $request): ?string
+    {
+        $meta = $request->input('meta');
+
+        if (is_array($meta) && array_key_exists('submission_code', $meta)) {
+            $value = trim((string) $meta['submission_code']);
+
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        if (! $request->has('submission_code')) {
+            return null;
+        }
+
+        $value = trim((string) $request->input('submission_code'));
+
+        return $value === '' ? null : $value;
     }
 
     private function toBoolean(mixed $value): ?bool

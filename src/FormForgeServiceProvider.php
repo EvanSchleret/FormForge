@@ -46,6 +46,8 @@ use EvanSchleret\FormForge\Submissions\SubmissionValidator;
 use EvanSchleret\FormForge\Submissions\DraftStateService;
 use EvanSchleret\FormForge\Submissions\StagedUploadService;
 use EvanSchleret\FormForge\Submissions\UploadManager;
+use EvanSchleret\FormForge\Support\DefaultFormPublicLinkResolver;
+use EvanSchleret\FormForge\Support\FormPublicLinkResolver;
 use Illuminate\Support\ServiceProvider;
 
 class FormForgeServiceProvider extends ServiceProvider
@@ -95,6 +97,19 @@ class FormForgeServiceProvider extends ServiceProvider
             ),
         );
         $this->app->singleton(HttpOptionsResolver::class, static fn (): HttpOptionsResolver => new HttpOptionsResolver());
+        $this->app->singleton(FormPublicLinkResolver::class, function (): FormPublicLinkResolver {
+            $configured = config('formforge.http.public_link.resolver', DefaultFormPublicLinkResolver::class);
+
+            if (! is_string($configured) || trim($configured) === '') {
+                $configured = DefaultFormPublicLinkResolver::class;
+            }
+
+            if (! class_exists($configured) || ! is_subclass_of($configured, FormPublicLinkResolver::class)) {
+                $configured = DefaultFormPublicLinkResolver::class;
+            }
+
+            return $this->app->make($configured);
+        });
         $this->app->singleton(ScopedRouteManager::class, static fn (): ScopedRouteManager => new ScopedRouteManager());
         $this->app->singleton(ScopedRouteAuthorizer::class, static fn (): ScopedRouteAuthorizer => new ScopedRouteAuthorizer());
         $this->app->singleton(SubmissionHttpResource::class, static fn (): SubmissionHttpResource => new SubmissionHttpResource());

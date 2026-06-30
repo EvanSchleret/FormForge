@@ -9,69 +9,75 @@ use EvanSchleret\FormForge\Exceptions\InvalidFieldDefinitionException;
 final class FieldType
 {
     public const TEXT = 'text';
-    public const TEXTAREA = 'textarea';
-    public const EMAIL = 'email';
     public const NUMBER = 'number';
-    public const SELECT = 'select';
-    public const SELECT_MENU = 'select_menu';
     public const RADIO = 'radio';
-    public const CHECKBOX = 'checkbox';
+    public const CONSENT = 'consent';
     public const CHECKBOX_GROUP = 'checkbox_group';
-    public const SWITCH = 'switch';
+    public const TEMPORAL = 'temporal';
     public const DATE = 'date';
     public const TIME = 'time';
-    public const DATETIME = 'datetime';
-    public const DATE_RANGE = 'date_range';
-    public const DATETIME_RANGE = 'datetime_range';
     public const FILE = 'file';
+    public const ADDRESS = 'address';
 
     public static function all(): array
     {
         return [
             self::TEXT,
-            self::TEXTAREA,
-            self::EMAIL,
             self::NUMBER,
-            self::SELECT,
-            self::SELECT_MENU,
             self::RADIO,
-            self::CHECKBOX,
+            self::CONSENT,
             self::CHECKBOX_GROUP,
-            self::SWITCH,
-            self::DATE,
-            self::TIME,
-            self::DATETIME,
-            self::DATE_RANGE,
-            self::DATETIME_RANGE,
+            self::TEMPORAL,
             self::FILE,
+            self::ADDRESS,
         ];
     }
 
     public static function assert(string $type): void
     {
-        if (! in_array($type, self::all(), true)) {
+        $normalized = self::normalize($type);
+
+        if (! in_array($normalized, self::all(), true)) {
             throw new InvalidFieldDefinitionException("Unsupported field type [{$type}].");
         }
     }
 
+    public static function normalize(string $type): string
+    {
+        return match ($type) {
+            self::DATE,
+            self::TIME => self::TEMPORAL,
+            default => $type,
+        };
+    }
+
+    public static function temporalMode(string $type): ?string
+    {
+        return match ($type) {
+            self::DATE => 'date',
+            self::TIME => 'time',
+            default => null,
+        };
+    }
+
     public static function isOptionBased(string $type): bool
     {
-        return in_array($type, [self::SELECT, self::SELECT_MENU, self::RADIO, self::CHECKBOX_GROUP], true);
+        return in_array($type, [self::RADIO, self::CHECKBOX_GROUP], true);
     }
 
     public static function isBoolean(string $type): bool
     {
-        return in_array($type, [self::CHECKBOX, self::SWITCH], true);
+        return $type === self::CONSENT;
     }
 
     public static function isRange(string $type): bool
     {
-        return in_array($type, [self::DATE_RANGE, self::DATETIME_RANGE], true);
+        return false;
     }
 
     public static function isDateLike(string $type): bool
     {
-        return in_array($type, [self::DATE, self::DATETIME], true);
+        return in_array($type, [self::DATE, self::TIME], true);
     }
 
     public static function isFile(string $type): bool
