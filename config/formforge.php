@@ -225,6 +225,14 @@ return [
         'direct' => [
             'signature_ttl_seconds' => env('FORMFORGE_DIRECT_SIGNATURE_TTL', 900),
         ],
+
+        'antivirus' => [
+            'enabled' => env('FORMFORGE_CLAMAV_ENABLED', false),
+            'endpoint' => env('FORMFORGE_CLAMAV_ENDPOINT'),
+            'username' => env('FORMFORGE_CLAMAV_USERNAME'),
+            'password' => env('FORMFORGE_CLAMAV_PASSWORD'),
+            'timeout' => env('FORMFORGE_CLAMAV_TIMEOUT', 30),
+        ],
     ],
 
     /*

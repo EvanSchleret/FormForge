@@ -7,6 +7,7 @@ namespace EvanSchleret\FormForge\Submissions;
 use EvanSchleret\FormForge\Exceptions\FormForgeException;
 use EvanSchleret\FormForge\Exceptions\UnsupportedUploadModeException;
 use EvanSchleret\FormForge\Models\StagedUpload;
+use EvanSchleret\FormForge\Support\Antivirus\FileScanner;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Arr;
@@ -17,6 +18,7 @@ class UploadManager
 {
     public function __construct(
         private readonly StagedUploadService $stagedUploads,
+        private readonly FileScanner $scanner,
     ) {
     }
 
@@ -78,6 +80,8 @@ class UploadManager
         foreach ($items as $item) {
             $metadata[] = $this->normalizeExistingMetadata($field, $item);
         }
+
+        $this->validateMetadataLimits($field, $metadata);
 
         $multiple = (bool) ($field['multiple'] ?? false);
 
@@ -185,6 +189,10 @@ class UploadManager
         $extension = $file->getClientOriginalExtension() ?: $file->extension() ?: '';
         $storedName = $this->storedFilename($originalName, $extension);
 
+        if ((bool) config('formforge.uploads.antivirus.enabled', false)) {
+            $this->scanner->scan($file);
+        }
+
         $options = [];
 
         if ($visibility !== null) {
@@ -233,9 +241,9 @@ class UploadManager
 
         $storedName = (string) Arr::get($item, 'stored_name', basename($path));
         $originalName = (string) Arr::get($item, 'original_name', $storedName);
-        $mimeType = (string) Arr::get($item, 'mime_type', Storage::disk($disk)->mimeType($path) ?: 'application/octet-stream');
+        $mimeType = (string) (Storage::disk($disk)->mimeType($path) ?: Arr::get($item, 'mime_type', 'application/octet-stream'));
         $extension = (string) Arr::get($item, 'extension', pathinfo($path, PATHINFO_EXTENSION));
-        $size = (int) Arr::get($item, 'size', Storage::disk($disk)->size($path));
+        $size = (int) Storage::disk($disk)->size($path);
         $checksum = (string) Arr::get($item, 'checksum', $this->safeChecksum($disk, $path));
         $metadata = Arr::get($item, 'metadata', []);
 
@@ -256,6 +264,68 @@ class UploadManager
             'checksum' => $checksum,
             'metadata' => $metadata,
         ];
+    }
+
+    private function validateMetadataLimits(array $field, array $metadata): void
+    {
+        $maxFiles = isset($field['max_files']) ? (int) $field['max_files'] : null;
+
+        if ($maxFiles !== null && $maxFiles > 0 && count($metadata) > $maxFiles) {
+            throw new FormForgeException(trans('formforge::messages.upload_max_files'));
+        }
+
+        $maxSize = isset($field['max_size']) ? (int) $field['max_size'] : null;
+        $maxTotalSize = isset($field['max_total_size']) ? (int) $field['max_total_size'] : null;
+        $totalSize = 0;
+
+        foreach ($metadata as $item) {
+            $size = (int) ($item['size'] ?? 0);
+            $totalSize += $size;
+
+            if ($maxSize !== null && $maxSize > 0 && $size > $maxSize) {
+                throw new FormForgeException(trans('formforge::messages.staged_upload_max_size', ['max' => $maxSize]));
+            }
+
+            if (! $this->metadataMatchesAccept($item, $field['accept'] ?? [])) {
+                throw new FormForgeException(trans('formforge::messages.staged_upload_accepted_types_mismatch'));
+            }
+        }
+
+        if ($maxTotalSize !== null && $maxTotalSize > 0 && $totalSize > $maxTotalSize) {
+            throw new FormForgeException(trans('formforge::messages.upload_max_total_size'));
+        }
+    }
+
+    private function metadataMatchesAccept(array $metadata, mixed $accept): bool
+    {
+        if (! is_array($accept) || $accept === []) {
+            return true;
+        }
+
+        $extension = strtolower(ltrim((string) ($metadata['extension'] ?? ''), '.'));
+        $mimeType = strtolower((string) ($metadata['mime_type'] ?? ''));
+
+        foreach ($accept as $rawRule) {
+            $rule = strtolower(trim((string) $rawRule));
+
+            if ($rule === '' || $rule === '*' || ($rule === 'image/*' && str_starts_with($mimeType, 'image/'))) {
+                return true;
+            }
+
+            if (str_starts_with($rule, '.') && $extension === ltrim($rule, '.')) {
+                return true;
+            }
+
+            if (str_contains($rule, '/') && $mimeType === $rule) {
+                return true;
+            }
+
+            if (! str_contains($rule, '/') && $extension === $rule) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function commitStagedFile(array $form, array $field, array $item, ?Model $submittedBy = null): array

@@ -47,6 +47,8 @@ use EvanSchleret\FormForge\Submissions\DraftStateService;
 use EvanSchleret\FormForge\Submissions\StagedUploadService;
 use EvanSchleret\FormForge\Submissions\UploadManager;
 use EvanSchleret\FormForge\Support\DefaultFormPublicLinkResolver;
+use EvanSchleret\FormForge\Support\Antivirus\ClamAvRestScanner;
+use EvanSchleret\FormForge\Support\Antivirus\FileScanner;
 use EvanSchleret\FormForge\Support\FormPublicLinkResolver;
 use Illuminate\Support\ServiceProvider;
 
@@ -89,11 +91,18 @@ class FormForgeServiceProvider extends ServiceProvider
             ),
         );
         $this->app->singleton(DraftStateService::class, static fn (): DraftStateService => new DraftStateService());
-        $this->app->singleton(StagedUploadService::class, static fn (): StagedUploadService => new StagedUploadService());
+        $this->app->singleton(FileScanner::class, static fn (): FileScanner => new ClamAvRestScanner());
+        $this->app->singleton(
+            StagedUploadService::class,
+            fn (): StagedUploadService => new StagedUploadService(
+                scanner: $this->app->make(FileScanner::class),
+            ),
+        );
         $this->app->singleton(
             UploadManager::class,
             fn (): UploadManager => new UploadManager(
                 stagedUploads: $this->app->make(StagedUploadService::class),
+                scanner: $this->app->make(FileScanner::class),
             ),
         );
         $this->app->singleton(HttpOptionsResolver::class, static fn (): HttpOptionsResolver => new HttpOptionsResolver());
