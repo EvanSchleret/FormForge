@@ -7,6 +7,7 @@ namespace EvanSchleret\FormForge\Submissions;
 use EvanSchleret\FormForge\Exceptions\FormForgeException;
 use EvanSchleret\FormForge\Models\StagedUpload;
 use EvanSchleret\FormForge\Support\ModelClassResolver;
+use EvanSchleret\FormForge\Support\Antivirus\FileScanner;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
@@ -15,6 +16,11 @@ use Illuminate\Support\Str;
 
 class StagedUploadService
 {
+    public function __construct(
+        private readonly FileScanner $scanner,
+    ) {
+    }
+
     public function cleanupExpired(bool $dryRun = false, bool $deleteFiles = true, int $chunk = 500): array
     {
         $chunk = max(1, $chunk);
@@ -73,6 +79,7 @@ class StagedUploadService
     {
         $this->assertFileField($field);
         $this->validateUploadedFile($file, $field);
+        $this->scanFile($file);
 
         $disk = trim((string) config('formforge.uploads.temporary_disk', config('filesystems.default')));
         $directory = $this->buildTemporaryDirectory(
@@ -201,6 +208,13 @@ class StagedUploadService
         }
     }
 
+    private function scanFile(UploadedFile $file): void
+    {
+        if ((bool) config('formforge.uploads.antivirus.enabled', false)) {
+            $this->scanner->scan($file);
+        }
+    }
+
     private function validateUploadedFile(UploadedFile $file, array $field): void
     {
         $maxSize = isset($field['max_size']) ? (int) $field['max_size'] : null;
@@ -209,7 +223,7 @@ class StagedUploadService
             $size = (int) ($file->getSize() ?? 0);
 
             if ($size > $maxSize) {
-                throw new FormForgeException("Staged upload exceeds max_size [{$maxSize}] bytes.");
+                throw new FormForgeException(trans('formforge::messages.staged_upload_max_size', ['max' => $maxSize]));
             }
         }
 

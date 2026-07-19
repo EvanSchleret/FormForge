@@ -62,6 +62,8 @@ class FieldBlueprint
 
     private ?int $maxFiles = null;
 
+    private ?int $maxTotalSize = null;
+
     private ?string $storageDisk = null;
 
     private ?string $storageDirectory = null;
@@ -141,6 +143,7 @@ class FieldBlueprint
         }
         $field->maxSize = isset($schema['max_size']) ? (int) $schema['max_size'] : null;
         $field->maxFiles = isset($schema['max_files']) ? (int) $schema['max_files'] : null;
+        $field->maxTotalSize = isset($schema['max_total_size']) ? (int) $schema['max_total_size'] : null;
 
         if (is_array($schema['storage'] ?? null)) {
             $field->storageDisk = isset($schema['storage']['disk']) ? trim((string) $schema['storage']['disk']) : null;
@@ -402,6 +405,17 @@ class FieldBlueprint
         return $this;
     }
 
+    public function maxTotalSize(int $maxTotalSize): self
+    {
+        if ($maxTotalSize <= 0) {
+            throw new InvalidFieldDefinitionException("maxTotalSize must be positive on field [{$this->name}].");
+        }
+
+        $this->maxTotalSize = $maxTotalSize;
+
+        return $this;
+    }
+
     public function storageDisk(string $storageDisk): self
     {
         $storageDisk = trim($storageDisk);
@@ -489,6 +503,11 @@ class FieldBlueprint
     public function maxFilesValue(): ?int
     {
         return $this->maxFiles;
+    }
+
+    public function maxTotalSizeValue(): ?int
+    {
+        return $this->maxTotalSize;
     }
 
     public function storageDiskValue(): ?string
@@ -609,6 +628,10 @@ class FieldBlueprint
 
             if ($this->maxFiles !== null) {
                 $schema['max_files'] = $this->maxFiles;
+            }
+
+            if ($this->maxTotalSize !== null) {
+                $schema['max_total_size'] = $this->maxTotalSize;
             }
 
             $schema['storage'] = [

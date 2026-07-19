@@ -28,6 +28,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -983,6 +984,52 @@ it('stores uploaded files and persists normalized metadata in managed mode', fun
     expect($submission->files)->toHaveCount(1);
 
     Storage::disk('local')->assertExists($payloadFile['path']);
+});
+
+it('enforces the combined file size limit in managed mode', function (): void {
+    Storage::fake('local');
+
+    config()->set('formforge.uploads.mode', 'managed');
+    config()->set('formforge.uploads.disk', 'local');
+
+    $key = 'upload_total_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->file('documents')
+            ->multiple()
+            ->maxTotalSize(100)
+            ->storageDisk('local');
+
+    expect(static fn () => Form::get($key, '1')->submit([
+        'documents' => [
+            UploadedFile::fake()->create('one.txt', 64, 'text/plain'),
+            UploadedFile::fake()->create('two.txt', 64, 'text/plain'),
+        ],
+    ]))->toThrow(\Illuminate\Validation\ValidationException::class);
+});
+
+it('scans managed uploads with the configured ClamAV REST endpoint', function (): void {
+    Storage::fake('local');
+    Http::fake(['https://clamav.test/v2/scan' => Http::response([['Status' => 'OK']], 200)]);
+
+    config()->set('formforge.uploads.mode', 'managed');
+    config()->set('formforge.uploads.disk', 'local');
+    config()->set('formforge.uploads.antivirus.enabled', true);
+    config()->set('formforge.uploads.antivirus.endpoint', 'https://clamav.test/v2/scan');
+
+    $key = 'upload_scan_' . Str::lower(Str::random(8));
+
+    Form::define($key)
+        ->version('1')
+        ->file('document')
+            ->storageDisk('local');
+
+    Form::get($key, '1')->submit([
+        'document' => UploadedFile::fake()->create('document.txt', 1, 'text/plain'),
+    ]);
+
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://clamav.test/v2/scan');
 });
 
 it('accepts direct upload references and persists file metadata', function (): void {

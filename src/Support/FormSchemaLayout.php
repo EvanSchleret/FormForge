@@ -165,6 +165,14 @@ final class FormSchemaLayout
                     $field['rules'] = [];
                 }
 
+                if ($type === FieldType::FILE) {
+                    foreach (['max_size', 'max_files', 'max_total_size'] as $fileLimit) {
+                        if (isset($field[$fileLimit])) {
+                            $field[$fileLimit] = max(1, (int) $field[$fileLimit]);
+                        }
+                    }
+                }
+
                 $fields[] = $field;
             }
 
