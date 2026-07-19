@@ -4,6 +4,47 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog.
 
+## v2.1.0 - 2026-07-19
+
+### ✨ Highlights
+
+#### 📦 Advanced file upload validation
+
+File fields now support accepted types, maximum file counts, per-file size limits, and cumulative size limits through the DSL and backend validation.
+
+```php
+Form::define('documents')
+    ->version('1')
+    ->file('attachments')
+        ->multiple()
+        ->accept(['.pdf', 'image/*'])
+        ->maxSize(5_000_000)
+        ->maxFiles(3)
+        ->maxTotalSize(10_000_000);
+
+```
+#### 🛡️ Optional ClamAV scanning
+
+Managed and staged uploads can be scanned through a remote ClamAV REST service such as `ajilaag/clamav-rest`, with optional HTTPS Basic Authentication.
+
+```dotenv
+FORMFORGE_CLAMAV_ENABLED=true
+FORMFORGE_CLAMAV_ENDPOINT=https://clamav.example.com/v2/scan
+FORMFORGE_CLAMAV_USERNAME=clamav-client
+FORMFORGE_CLAMAV_PASSWORD=secret
+FORMFORGE_CLAMAV_TIMEOUT=30
+
+```
+### 🚀 Features
+
+- **Uploads**: add file limits and optional ClamAV REST antivirus scanning (`0e52645`)
+
+### ❤️ Contributors
+
+- @EvanSchleret
+
+**Full Changelog**: https://github.com/EvanSchleret/FormForge/compare/v2.0.0...v2.1.0
+
 ## v2.0.0 - 2026-06-30
 
 ### v2.0.0
@@ -364,11 +405,13 @@ php artisan formforge:install:merge --skip-migrations --no-backup
 
 
 
+
 ```
 #### DB Migration
 
 ```bash
 php artisan migrate
+
 
 
 
