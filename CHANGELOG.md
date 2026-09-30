@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog.
 
+## v2.1.1 - 2026-09-30
+
+### v2.1.1
+
+#### 🐛 Bug Fixes
+
+- **Security**: require authentication and a Gate ability for management routes by default, and raise the minimum supported Laravel versions to patched releases ([#6](https://github.com/EvanSchleret/FormForge/pull/6)) ([(c106f9f)](https://github.com/EvanSchleret/FormForge/commit/c106f9f))
+
+#### ❤️ Contributors
+
+- @EvanSchleret
+
+Full Changelog: [v2.1.0...v2.1.1](https://github.com/EvanSchleret/FormForge/compare/v2.1.0...v2.1.1)
+
 ## v2.1.0 - 2026-07-19
 
 ### ✨ Highlights
@@ -22,6 +36,7 @@ Form::define('documents')
         ->maxFiles(3)
         ->maxTotalSize(10_000_000);
 
+
 ```
 #### 🛡️ Optional ClamAV scanning
 
@@ -33,6 +48,7 @@ FORMFORGE_CLAMAV_ENDPOINT=https://clamav.example.com/v2/scan
 FORMFORGE_CLAMAV_USERNAME=clamav-client
 FORMFORGE_CLAMAV_PASSWORD=secret
 FORMFORGE_CLAMAV_TIMEOUT=30
+
 
 ```
 ### 🚀 Features
@@ -406,11 +422,13 @@ php artisan formforge:install:merge --skip-migrations --no-backup
 
 
 
+
 ```
 #### DB Migration
 
 ```bash
 php artisan migrate
+
 
 
 
