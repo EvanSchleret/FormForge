@@ -360,10 +360,10 @@ return [
             'require_published' => false,
         ],
         'management' => [
-            'auth' => 'public',
+            'auth' => 'required',
             'guard' => null,
             'middleware' => ['throttle:60,1'],
-            'ability' => null,
+            'ability' => 'formforge.manage',
             'abilities' => [
                 'index' => null,
                 'categories' => null,
