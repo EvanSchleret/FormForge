@@ -21,6 +21,11 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
+beforeEach(function (): void {
+    config()->set('formforge.http.management.auth', 'public');
+    config()->set('formforge.http.management.ability', null);
+});
+
 it('exposes schema endpoints over HTTP', function (): void {
     $key = 'schema_http_' . Str::lower(Str::random(8));
 
@@ -1453,6 +1458,26 @@ it('supports management ability authorization', function (): void {
         'title' => 'Allowed',
         'fields' => [['type' => 'text', 'name' => 'name']],
     ])->assertCreated();
+});
+
+it('requires authentication and the management ability by default', function (): void {
+    $defaults = require dirname(__DIR__, 2) . '/config/formforge.php';
+
+    expect($defaults['http']['management']['auth'])->toBe('required')
+        ->and($defaults['http']['management']['ability'])->toBe('formforge.manage');
+
+    config()->set('formforge.http.management.auth', $defaults['http']['management']['auth']);
+    config()->set('formforge.http.management.ability', $defaults['http']['management']['ability']);
+
+    $this->getJson('/api/formforge/v1/forms')->assertUnauthorized();
+
+    $denied = User::query()->create(['name' => 'denied']);
+    $this->actingAs($denied)->getJson('/api/formforge/v1/forms')->assertForbidden();
+
+    Gate::define('formforge.manage', static fn (?User $user): bool => $user?->name === 'allowed');
+
+    $allowed = User::query()->create(['name' => 'allowed']);
+    $this->actingAs($allowed)->getJson('/api/formforge/v1/forms')->assertOk();
 });
 
 it('supports management category ability authorization', function (): void {

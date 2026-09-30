@@ -5,12 +5,12 @@
     "license": "MIT",
     "require": {
         "php": "^8.2",
-        "illuminate/console": "^12.0 || ^13.0",
-        "illuminate/database": "^12.0 || ^13.0",
-        "illuminate/filesystem": "^12.0 || ^13.0",
-        "illuminate/http": "^12.0 || ^13.0",
-        "illuminate/support": "^12.0 || ^13.0",
-        "illuminate/validation": "^12.0 || ^13.0",
+        "illuminate/console": "^12.69 || ^13.30",
+        "illuminate/database": "^12.69 || ^13.30",
+        "illuminate/filesystem": "^12.69 || ^13.30",
+        "illuminate/http": "^12.69 || ^13.30",
+        "illuminate/support": "^12.69 || ^13.30",
+        "illuminate/validation": "^12.69 || ^13.30",
         "mews/purifier": "^3.4"
     },
     "require-dev": {

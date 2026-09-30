@@ -83,6 +83,8 @@ Main endpoint groups:
 
 For scoped tenant/context URLs, use `formforge.http.scoped_routes`.
 
+Management endpoints require an authenticated user and the `formforge.manage` Gate ability by default. Define that ability in the host application or configure per-action abilities under `formforge.http.management.abilities`.
+
 ## Common Commands
 
 ```bash
