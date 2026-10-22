@@ -42,6 +42,7 @@ use EvanSchleret\FormForge\Submissions\SubmissionService;
 use EvanSchleret\FormForge\Submissions\SubmissionExportService;
 use EvanSchleret\FormForge\Submissions\SubmissionPrivacyService;
 use EvanSchleret\FormForge\Submissions\SubmissionReadService;
+use EvanSchleret\FormForge\Submissions\SubmissionStatisticsService;
 use EvanSchleret\FormForge\Submissions\SubmissionValidator;
 use EvanSchleret\FormForge\Submissions\DraftStateService;
 use EvanSchleret\FormForge\Submissions\StagedUploadService;
@@ -57,6 +58,19 @@ class FormForgeServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->mergeConfigFrom(dirname(__DIR__) . '/config/formforge.php', 'formforge');
+
+        if (class_exists(\EvanSchleret\LaravelTypeBridge\Attributes\TypeBridgeResource::class)) {
+            $sources = config('typebridge.sources', []);
+
+            if (! is_array($sources)) {
+                $sources = [];
+            }
+
+            $sources[] = app_path('Http/Resources');
+            $sources[] = dirname(__DIR__) . '/src/Http/Resources';
+
+            $this->app['config']->set('typebridge.sources', array_values(array_unique($sources)));
+        }
 
         $this->app->singleton(FormRegistry::class, static fn (): FormRegistry => new FormRegistry());
         $this->app->singleton(AutomationRegistry::class, static fn (): AutomationRegistry => new AutomationRegistry());
@@ -76,6 +90,12 @@ class FormForgeServiceProvider extends ServiceProvider
             SubmissionReadService::class,
             fn (): SubmissionReadService => new SubmissionReadService(
                 ownership: $this->app->make(OwnershipManager::class),
+            ),
+        );
+        $this->app->singleton(
+            SubmissionStatisticsService::class,
+            fn (): SubmissionStatisticsService => new SubmissionStatisticsService(
+                submissions: $this->app->make(SubmissionReadService::class),
             ),
         );
         $this->app->singleton(

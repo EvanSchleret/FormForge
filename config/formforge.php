@@ -379,6 +379,7 @@ return [
                 'revisions' => null,
                 'diff' => null,
                 'responses' => null,
+                'statistics' => null,
                 'responses_export' => null,
                 'response' => null,
                 'response_delete' => null,

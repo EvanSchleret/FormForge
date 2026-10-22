@@ -16,7 +16,8 @@
     "require-dev": {
         "orchestra/testbench": "^10.0 || ^11.0",
         "pestphp/pest": "^3.8",
-        "pestphp/pest-plugin-laravel": "^3.2"
+        "pestphp/pest-plugin-laravel": "^3.2",
+        "evanschleret/laravel-typebridge": "^1.1"
     },
     "autoload": {
         "psr-4": {
@@ -39,7 +40,9 @@
         }
     },
     "scripts": {
-        "test": "pest"
+        "test": "pest",
+        "types:generate": "@php vendor/bin/testbench typebridge:generate --output-path=\"$PWD/../formforgeclient/src/runtime/types/generated\" --clean",
+        "types:check": "@php vendor/bin/testbench typebridge:check --output-path=\"$PWD/../formforgeclient/src/runtime/types/generated\""
     },
     "minimum-stability": "stable",
     "prefer-stable": true,

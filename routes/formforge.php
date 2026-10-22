@@ -124,6 +124,7 @@ $registerRoutes = static function (?string $scopeName, callable $isEndpointEnabl
         Route::middleware($routeMiddleware('management', 'revisions', $scopeName))->get('/forms/{key}/revisions', [$managementController, 'revisions']);
         Route::middleware($routeMiddleware('management', 'diff', $scopeName))->get('/forms/{key}/diff/{fromVersion}/{toVersion}', [$managementController, 'diff']);
         Route::middleware($routeMiddleware('management', 'responses', $scopeName))->get('/forms/{key}/responses', [$managementController, 'responses']);
+        Route::middleware($routeMiddleware('management', 'statistics', $scopeName))->get('/forms/{key}/statistics', [$managementController, 'statistics']);
         Route::middleware($routeMiddleware('management', 'responses_export', $scopeName))->get('/forms/{key}/responses/export', [$managementController, 'exportResponses']);
         Route::middleware($routeMiddleware('management', 'gdpr_policy', $scopeName))->put('/forms/{key}/gdpr-policy', [$managementController, 'upsertGdprPolicy']);
         Route::middleware($routeMiddleware('management', 'response', $scopeName))->get('/forms/{key}/responses/{submissionUuid}', [$managementController, 'response']);

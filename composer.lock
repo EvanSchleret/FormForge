@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "2158e3ca1f0a867c1f62d761c1490f91",
+    "content-hash": "0c8e8467c3deb889be7d4cdb3633fa77",
     "packages": [
         {
             "name": "brick/math",
@@ -6258,6 +6258,68 @@
                 "source": "https://github.com/doctrine/deprecations/tree/1.1.6"
             },
             "time": "2026-02-07T07:09:04+00:00"
+        },
+        {
+            "name": "evanschleret/laravel-typebridge",
+            "version": "v1.1.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/EvanSchleret/laravel-typebridge.git",
+                "reference": "21a3c233e9f46d8ea529208d622fbf5bdc29445b"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/EvanSchleret/laravel-typebridge/zipball/21a3c233e9f46d8ea529208d622fbf5bdc29445b",
+                "reference": "21a3c233e9f46d8ea529208d622fbf5bdc29445b",
+                "shasum": ""
+            },
+            "require": {
+                "illuminate/console": "^12.0 || ^13.0",
+                "illuminate/database": "^12.0 || ^13.0",
+                "illuminate/filesystem": "^12.0 || ^13.0",
+                "illuminate/http": "^12.0 || ^13.0",
+                "illuminate/support": "^12.0 || ^13.0",
+                "php": "^8.2"
+            },
+            "require-dev": {
+                "orchestra/testbench": "^10.0 || ^11.0",
+                "pestphp/pest": "^3.0 || ^4.0",
+                "pestphp/pest-plugin-laravel": "^3.0 || ^4.0"
+            },
+            "type": "library",
+            "extra": {
+                "laravel": {
+                    "providers": [
+                        "EvanSchleret\\LaravelTypeBridge\\TypeBridgeServiceProvider"
+                    ]
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "EvanSchleret\\LaravelTypeBridge\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "description": "Generate deterministic TypeScript resources from Laravel resource attributes",
+            "keywords": [
+                "api",
+                "code-generation",
+                "dto",
+                "json-resource",
+                "laravel",
+                "php-attributes",
+                "resource",
+                "types",
+                "typescript"
+            ],
+            "support": {
+                "issues": "https://github.com/EvanSchleret/laravel-typebridge/issues",
+                "source": "https://github.com/EvanSchleret/laravel-typebridge/tree/v1.1.0"
+            },
+            "time": "2026-05-01T09:32:31+00:00"
         },
         {
             "name": "fakerphp/faker",

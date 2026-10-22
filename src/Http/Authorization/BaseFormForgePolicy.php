@@ -161,6 +161,11 @@ class BaseFormForgePolicy
         return false;
     }
 
+    public function management_statistics(mixed $user, FormForgeAuthorizationContext $context): bool
+    {
+        return false;
+    }
+
     public function management_responses_export(mixed $user, FormForgeAuthorizationContext $context): bool
     {
         return false;
