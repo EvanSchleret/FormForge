@@ -7,6 +7,7 @@ namespace EvanSchleret\FormForge\Http\Controllers;
 use EvanSchleret\FormForge\Exceptions\FormConflictException;
 use EvanSchleret\FormForge\Exceptions\FormForgeException;
 use EvanSchleret\FormForge\Exceptions\FormNotFoundException;
+use EvanSchleret\FormForge\Http\Resources\FormStatisticsHttpResource;
 use EvanSchleret\FormForge\Http\Resources\SubmissionHttpResource;
 use EvanSchleret\FormForge\Management\FormCategoryService;
 use EvanSchleret\FormForge\Management\FormMutationService;
@@ -18,11 +19,13 @@ use EvanSchleret\FormForge\Persistence\FormDefinitionRepository;
 use EvanSchleret\FormForge\Submissions\SubmissionReadService;
 use EvanSchleret\FormForge\Submissions\SubmissionExportService;
 use EvanSchleret\FormForge\Submissions\SubmissionPrivacyService;
+use EvanSchleret\FormForge\Submissions\SubmissionStatisticsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\Validator;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -188,6 +191,40 @@ class FormManagementController
                 'next' => $paginator->nextPageUrl(),
             ],
         ]);
+    }
+
+    public function statistics(
+        Request $request,
+        FormDefinitionRepository $repository,
+        SubmissionStatisticsService $statistics,
+    ): JsonResponse {
+        $key = $this->routeRequired($request, 'key');
+        $owner = $this->resolvedOwner($request, 'statistics');
+        $filters = Validator::make($request->query(), [
+            'version' => ['required', 'string', 'max:255'],
+            'from' => ['nullable', 'date'],
+            'to' => ['nullable', 'date', 'after_or_equal:from'],
+            'granularity' => ['nullable', 'in:day,week'],
+            'timezone' => ['nullable', 'timezone'],
+            'is_test' => ['sometimes', 'boolean'],
+        ])->validate();
+
+        $version = trim((string) $filters['version']);
+        $definition = $repository->find($key, $version, includeDeleted: true, owner: $owner);
+
+        if ($definition === null) {
+            throw new NotFoundHttpException("Form [{$key}] version [{$version}] not found.");
+        }
+
+        $data = $statistics->summarize($key, $definition, [
+            'from' => $filters['from'] ?? null,
+            'to' => $filters['to'] ?? null,
+            'granularity' => $filters['granularity'] ?? 'day',
+            'timezone' => $filters['timezone'] ?? config('app.timezone', 'UTC'),
+            'is_test' => $filters['is_test'] ?? false,
+        ], $owner);
+
+        return (new FormStatisticsHttpResource($data))->response();
     }
 
     public function exportResponses(

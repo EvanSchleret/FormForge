@@ -39,6 +39,7 @@ class AuthorizationActionMap
             'management.revisions' => 'management_revisions',
             'management.diff' => 'management_diff',
             'management.responses' => 'management_responses',
+            'management.statistics' => 'management_statistics',
             'management.responses_export' => 'management_responses_export',
             'management.response' => 'management_response',
             'management.response_delete' => 'management_response_delete',

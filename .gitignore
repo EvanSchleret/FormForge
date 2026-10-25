@@ -26,5 +26,7 @@ Homestead.json
 
 .phpunit.cache/
 
+.DS_Store
+
 .phpunit.cache/
 .idea

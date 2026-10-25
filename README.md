@@ -29,6 +29,7 @@ FormForge is a backend form engine for Laravel (non-UI):
 - immutable form revisions
 - strict server-side validation
 - built-in HTTP API
+- question-level response statistics
 - scoped routes and owner-aware authorization
 - submission exports (CSV/JSONL)
 - GDPR retention/anonymization tools
