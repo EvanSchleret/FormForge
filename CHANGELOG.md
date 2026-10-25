@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog.
 
+## v2.3.1 - 2026-10-25
+
+### v2.3.1
+
+#### ✨ Highlights
+
+##### 🗑️ Delete responses with their form
+
+Deleting a form now also deletes its associated responses and uploaded response files by default. Pass `delete_responses=false` to retain responses; the API reports the number deleted in `data.deleted_responses`.
+
+```http
+DELETE /api/formforge/v1/forms/{key}?delete_responses=false
+
+```
+#### 🚀 Features
+
+- **Management API**: delete a form’s responses and uploaded files by default, with an option to retain them [(2491fb9)](https://github.com/EvanSchleret/FormForge/commit/2491fb9)
+
+#### ❤️ Contributors
+
+- @EvanSchleret
+
+Full Changelog: [v2.3.0...v2.3.1](https://github.com/EvanSchleret/FormForge/compare/v2.3.0...v2.3.1)
+
 ## v2.3.0 - 2026-10-25
 
 ### v2.3.0
@@ -41,6 +65,7 @@ FormForge now exposes a version-aware statistics endpoint so applications can su
 
 ```http
 GET /api/formforge/v1/forms/{key}/statistics?version=1&granularity=week&timezone=Europe%2FZurich
+
 
 
 ```
@@ -95,6 +120,7 @@ Form::define('documents')
 
 
 
+
 ```
 #### 🛡️ Optional ClamAV scanning
 
@@ -106,6 +132,7 @@ FORMFORGE_CLAMAV_ENDPOINT=https://clamav.example.com/v2/scan
 FORMFORGE_CLAMAV_USERNAME=clamav-client
 FORMFORGE_CLAMAV_PASSWORD=secret
 FORMFORGE_CLAMAV_TIMEOUT=30
+
 
 
 
@@ -485,11 +512,13 @@ php artisan formforge:install:merge --skip-migrations --no-backup
 
 
 
+
 ```
 #### DB Migration
 
 ```bash
 php artisan migrate
+
 
 
 
