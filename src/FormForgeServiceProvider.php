@@ -26,10 +26,12 @@ use EvanSchleret\FormForge\Commands\SyncCommand;
 use EvanSchleret\FormForge\Commands\SubmissionsExportCommand;
 use EvanSchleret\FormForge\Commands\UploadsCleanupCommand;
 use EvanSchleret\FormForge\Http\Authorization\ScopedRouteAuthorizer;
+use EvanSchleret\FormForge\Access\FormAccessChallengeService;
 use EvanSchleret\FormForge\Http\EndpointRequestGuard;
 use EvanSchleret\FormForge\Http\HttpOptionsResolver;
 use EvanSchleret\FormForge\Http\Middleware\ApplyEndpointOptions;
 use EvanSchleret\FormForge\Http\Middleware\ApplyRouteScope;
+use EvanSchleret\FormForge\Http\Middleware\RequireFormAccess;
 use EvanSchleret\FormForge\Http\ScopedRouteManager;
 use EvanSchleret\FormForge\Http\Resources\SubmissionHttpResource;
 use EvanSchleret\FormForge\Management\FormCategoryService;
@@ -75,6 +77,9 @@ class FormForgeServiceProvider extends ServiceProvider
         $this->app->singleton(FormRegistry::class, static fn (): FormRegistry => new FormRegistry());
         $this->app->singleton(AutomationRegistry::class, static fn (): AutomationRegistry => new AutomationRegistry());
         $this->app->singleton(FormDefinitionRepository::class, static fn (): FormDefinitionRepository => new FormDefinitionRepository());
+        $this->app->singleton(FormAccessChallengeService::class, fn (): FormAccessChallengeService => new FormAccessChallengeService(
+            definitions: $this->app->make(FormDefinitionRepository::class),
+        ));
         $this->app->singleton(OwnershipManager::class, static fn (): OwnershipManager => new OwnershipManager());
         $this->app->singleton(FormCategoryService::class, fn (): FormCategoryService => new FormCategoryService(
             ownership: $this->app->make(OwnershipManager::class),
@@ -203,6 +208,7 @@ class FormForgeServiceProvider extends ServiceProvider
         $router = $this->app->make('router');
         $router->aliasMiddleware('formforge.endpoint', ApplyEndpointOptions::class);
         $router->aliasMiddleware('formforge.scope', ApplyRouteScope::class);
+        $router->aliasMiddleware('formforge.access', RequireFormAccess::class);
 
         if ((bool) config('formforge.http.enabled', true)) {
             $this->loadRoutesFrom(dirname(__DIR__) . '/routes/formforge.php');

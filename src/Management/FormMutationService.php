@@ -45,8 +45,10 @@ class FormMutationService
         $api = $this->normalizedArray($input['api'] ?? []);
         $meta = $this->normalizedArray($input['meta'] ?? []);
         unset($meta['submission_code_hash']);
+        unset($meta['access_code_hash']);
         $settingsLocked = $this->resolveSettingsLocked($input);
         [$meta, $submissionCodeRequired] = $this->resolveSubmissionCodeMeta($input, $meta, null, $settingsLocked);
+        [$meta] = $this->resolveAccessCodeMeta($input, $meta, $settingsLocked);
         [$publishAt, $pauseAt, $responseLimit] = $this->resolveLifecycleSettings($input, null, $settingsLocked);
         $meta = $this->sanitizeSettingsMeta($meta, $settingsLocked);
         $key = $this->buildGeneratedKey();
@@ -133,12 +135,17 @@ class FormMutationService
             ? $this->normalizedArray($input['meta'])
             : $currentMeta;
         unset($meta['submission_code_hash']);
+        unset($meta['access_code_hash']);
 
         if (is_string($currentMeta['submission_code_hash'] ?? null) && trim((string) $currentMeta['submission_code_hash']) !== '') {
             $meta['submission_code_hash'] = $currentMeta['submission_code_hash'];
         }
+        if (is_string($currentMeta['access_code_hash'] ?? null) && trim((string) $currentMeta['access_code_hash']) !== '') {
+            $meta['access_code_hash'] = $currentMeta['access_code_hash'];
+        }
         $settingsLocked = $this->resolveSettingsLocked($input, $currentSchema);
         [$meta, $submissionCodeRequired] = $this->resolveSubmissionCodeMeta($input, $meta, $currentSchema, $settingsLocked);
+        [$meta] = $this->resolveAccessCodeMeta($input, $meta, $settingsLocked);
         [$publishAt, $pauseAt, $responseLimit] = $this->resolveLifecycleSettings($input, $currentSchema, $settingsLocked);
         $meta = $this->sanitizeSettingsMeta($meta, $settingsLocked);
 
@@ -470,6 +477,8 @@ class FormMutationService
             'schema' => $schema,
             'has_submission_code' => is_string($meta['submission_code_hash'] ?? null)
                 && trim((string) $meta['submission_code_hash']) !== '',
+            'has_access_code' => is_string($meta['access_code_hash'] ?? null)
+                && trim((string) $meta['access_code_hash']) !== '',
             'meta' => $this->publicManagementMeta($meta),
             'created_by_type' => $definition->created_by_type,
             'created_by_id' => $definition->created_by_id,
@@ -875,10 +884,54 @@ class FormMutationService
         return [$meta, $required];
     }
 
+    private function resolveAccessCodeMeta(array $input, array $meta, bool $settingsLocked = false): array
+    {
+        if ($settingsLocked) {
+            unset($meta['access_code_hash']);
+
+            return [$meta];
+        }
+
+        $requiredOverride = array_key_exists('access_code_required', $input)
+            ? (bool) $input['access_code_required']
+            : null;
+
+        if ($requiredOverride === false) {
+            unset($meta['access_code_hash']);
+
+            return [$meta];
+        }
+
+        if (array_key_exists('access_code', $input)) {
+            $accessCode = trim((string) $input['access_code']);
+
+            if ($accessCode === '') {
+                if ($requiredOverride === true) {
+                    throw new FormForgeException('An access code is required when protection is enabled.');
+                }
+
+                unset($meta['access_code_hash']);
+
+                return [$meta];
+            }
+
+            $meta['access_code_hash'] = Hash::make($accessCode);
+
+            return [$meta];
+        }
+
+        if ($requiredOverride === true && (! is_string($meta['access_code_hash'] ?? null) || trim((string) $meta['access_code_hash']) === '')) {
+            throw new FormForgeException('An access code is required when protection is enabled.');
+        }
+
+        return [$meta];
+    }
+
     private function sanitizeSettingsMeta(array $meta, bool $settingsLocked): array
     {
         if ($settingsLocked) {
             unset($meta['submission_code_hash']);
+            unset($meta['access_code_hash']);
         }
 
         return $meta;
@@ -887,6 +940,7 @@ class FormMutationService
     private function publicManagementMeta(array $meta): array
     {
         unset($meta['submission_code_hash']);
+        unset($meta['access_code_hash']);
 
         return $meta;
     }

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use EvanSchleret\FormForge\Http\Controllers\FormDraftController;
+use EvanSchleret\FormForge\Http\Controllers\FormAccessController;
 use EvanSchleret\FormForge\Http\Controllers\FormManagementController;
 use EvanSchleret\FormForge\Http\Controllers\FormResolveController;
 use EvanSchleret\FormForge\Http\Controllers\FormSchemaController;
@@ -49,13 +50,15 @@ $resolveController = static function (string $key, string $fallback) use ($contr
 };
 
 $schemaController = $resolveController('schema', FormSchemaController::class);
+$accessController = $resolveController('access', FormAccessController::class);
 $submissionController = $resolveController('submission', FormSubmissionController::class);
 $uploadController = $resolveController('upload', FormUploadController::class);
 $resolveControllerClass = $resolveController('resolve', FormResolveController::class);
 $draftController = $resolveController('draft', FormDraftController::class);
 $managementController = $resolveController('management', FormManagementController::class);
+$accessMiddlewareEndpoints = ['schema', 'submission', 'upload', 'resolve'];
 
-$routeMiddleware = static function (string $endpoint, ?string $action = null, ?string $scopeName = null): array {
+$routeMiddleware = static function (string $endpoint, ?string $action = null, ?string $scopeName = null) use ($accessMiddlewareEndpoints): array {
     $items = [];
 
     if (is_string($scopeName) && trim($scopeName) !== '') {
@@ -66,12 +69,17 @@ $routeMiddleware = static function (string $endpoint, ?string $action = null, ?s
         ? 'formforge.endpoint:' . $endpoint . ',' . trim($action)
         : 'formforge.endpoint:' . $endpoint;
 
+    if (in_array($endpoint, $accessMiddlewareEndpoints, true)) {
+        $items[] = 'formforge.access';
+    }
+
     return $items;
 };
 
 $registerRoutes = static function (?string $scopeName, callable $isEndpointEnabled) use (
     $routeMiddleware,
     $schemaController,
+    $accessController,
     $submissionController,
     $uploadController,
     $resolveControllerClass,
@@ -82,6 +90,12 @@ $registerRoutes = static function (?string $scopeName, callable $isEndpointEnabl
         Route::middleware($routeMiddleware('schema', 'latest', $scopeName))->get('/forms/{key}', [$schemaController, 'latest']);
         Route::middleware($routeMiddleware('schema', 'versions', $scopeName))->get('/forms/{key}/versions', [$schemaController, 'versions']);
         Route::middleware($routeMiddleware('schema', 'show', $scopeName))->get('/forms/{key}/versions/{version}', [$schemaController, 'show']);
+    }
+
+    if ($isEndpointEnabled('access')) {
+        Route::middleware($routeMiddleware('access', 'status', $scopeName))->get('/forms/{key}/access', [$accessController, 'status']);
+        Route::middleware($routeMiddleware('access', 'challenge', $scopeName))->post('/forms/{key}/access-challenges', [$accessController, 'createChallenge']);
+        Route::middleware($routeMiddleware('access', 'verify', $scopeName))->post('/forms/{key}/access-challenges/{challenge}/verify', [$accessController, 'verifyChallenge']);
     }
 
     if ($isEndpointEnabled('submission')) {

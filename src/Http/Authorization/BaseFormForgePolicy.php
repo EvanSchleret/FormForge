@@ -26,6 +26,21 @@ class BaseFormForgePolicy
         return false;
     }
 
+    public function access_status(mixed $user, FormForgeAuthorizationContext $context): bool
+    {
+        return false;
+    }
+
+    public function access_challenge(mixed $user, FormForgeAuthorizationContext $context): bool
+    {
+        return false;
+    }
+
+    public function access_verify(mixed $user, FormForgeAuthorizationContext $context): bool
+    {
+        return false;
+    }
+
     public function submission_submit_latest(mixed $user, FormForgeAuthorizationContext $context): bool
     {
         return false;
