@@ -746,6 +746,23 @@ it('expires access challenges and invalidates them after the configured failed a
     Carbon::setTestNow();
 });
 
+it('rate limits access challenge requests over HTTP', function (): void {
+    config()->set('formforge.http.access.middleware', ['throttle:2,1']);
+    config()->set('formforge.http.management.middleware', []);
+
+    $create = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Rate limited access challenge',
+        'access_code' => 'rate-limit-pin',
+        'fields' => [['type' => 'text', 'name' => 'name']],
+    ])->assertCreated();
+    $key = (string) $create->json('data.key');
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/access-challenges")->assertCreated();
+    $this->postJson("/api/formforge/v1/forms/{$key}/access-challenges")->assertCreated();
+    $this->postJson("/api/formforge/v1/forms/{$key}/access-challenges")
+        ->assertStatus(429);
+});
+
 it('binds access challenges and authorizations to their form and scoped route', function (): void {
     $first = $this->postJson('/api/formforge/v1/forms', [
         'title' => 'First protected form',
