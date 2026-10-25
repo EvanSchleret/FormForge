@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog.
 
+## v2.3.0 - 2026-10-25
+
+### v2.3.0
+
+#### ✨ Highlights
+
+##### 🔐 Shared access code challenges
+
+Forms can require a shared access code before revealing their schema. FormForge validates the code through a short-lived, form- and scope-bound challenge, then grants temporary access to the public form endpoints. This is separate from `submission_code`, which continues to protect response submission.
+
+##### ⚙️ Settings-only updates
+
+Integrations can update form settings through a partial `PATCH` without resending the full form schema. Omitted fields remain unchanged.
+
+#### 🚀 Features
+
+- **Management API**: validate settings-only form updates and preserve existing settings when fields are omitted ([ (813489e) ](https://github.com/EvanSchleret/FormForge/commit/813489e694f6beb5ad0ff9556586952e2d15530f))
+- **Form access**: add shared-code challenges with configurable expiry and attempt limits, plus temporary authorization scoped to the form and owner ([ (cbb36a1) ](https://github.com/EvanSchleret/FormForge/commit/cbb36a150ee7e8ab50687b75af6f6cb7a67e783e))
+
+#### ❤️ Contributors
+
+- @EvanSchleret
+
+Full Changelog: [v2.2.0...v2.3.0](https://github.com/EvanSchleret/FormForge/compare/v2.2.0...v2.3.0)
+
 ## v2.2.0 - 2026-10-25
 
 ### v2.2.0
@@ -16,6 +41,7 @@ FormForge now exposes a version-aware statistics endpoint so applications can su
 
 ```http
 GET /api/formforge/v1/forms/{key}/statistics?version=1&granularity=week&timezone=Europe%2FZurich
+
 
 ```
 Optional filters include a date range and `is_test`.
@@ -68,6 +94,7 @@ Form::define('documents')
 
 
 
+
 ```
 #### 🛡️ Optional ClamAV scanning
 
@@ -79,6 +106,7 @@ FORMFORGE_CLAMAV_ENDPOINT=https://clamav.example.com/v2/scan
 FORMFORGE_CLAMAV_USERNAME=clamav-client
 FORMFORGE_CLAMAV_PASSWORD=secret
 FORMFORGE_CLAMAV_TIMEOUT=30
+
 
 
 
@@ -456,11 +484,13 @@ php artisan formforge:install:merge --skip-migrations --no-backup
 
 
 
+
 ```
 #### DB Migration
 
 ```bash
 php artisan migrate
+
 
 
 
