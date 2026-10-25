@@ -732,6 +732,20 @@ it('locks lifecycle settings when the form api declares settings locked', functi
         ->assertJsonPath('data.schema.response_limit', null)
         ->assertJsonPath('data.schema.submission_code_required', false)
         ->assertJsonPath('data.schema.api.formforge.settings_locked', true);
+
+    $key = (string) $response->json('data.key');
+
+    $this->getJson("/api/formforge/v1/forms/{$key}")
+        ->assertOk()
+        ->assertJsonMissingPath('data.api.formforge.settings_locked');
+
+    $this->patchJson("/api/formforge/v1/forms/{$key}", [
+        'api' => [
+            'submission' => ['auth' => 'required'],
+        ],
+    ])->assertOk()
+        ->assertJsonPath('data.schema.api.formforge.settings_locked', true)
+        ->assertJsonPath('data.schema.publish_at', null);
 });
 
 it('lists forms through paginated management endpoint', function (): void {
@@ -837,6 +851,28 @@ it('filters forms by category slug on management endpoint', function (): void {
         ->assertOk()
         ->assertJsonPath('meta.total', 1)
         ->assertJsonPath('data.data.0.key', $contactFormKey);
+});
+
+it('filters management forms by key or form uuid', function (): void {
+    $created = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'PIN protected form',
+        'submission_code' => '4826',
+        'fields' => [['type' => 'text', 'name' => 'name']],
+    ])->assertCreated();
+
+    $formKey = (string) $created->json('data.key');
+    $formUuid = (string) $created->json('data.form_uuid');
+
+    $this->getJson('/api/formforge/v1/forms?key=' . urlencode($formKey))
+        ->assertOk()
+        ->assertJsonPath('meta.total', 1)
+        ->assertJsonPath('data.data.0.key', $formKey)
+        ->assertJsonPath('data.data.0.has_submission_code', true);
+
+    $this->getJson('/api/formforge/v1/forms?key=' . urlencode($formUuid))
+        ->assertOk()
+        ->assertJsonPath('meta.total', 1)
+        ->assertJsonPath('data.data.0.form_uuid', $formUuid);
 });
 
 it('manages form categories through HTTP endpoints', function (): void {
@@ -1315,6 +1351,187 @@ it('patches a form and creates a new draft revision', function (): void {
         ->assertOk()
         ->assertJsonPath('data.version', '2')
         ->assertJsonPath('data.title', 'Survey V2');
+});
+
+it('patches form settings together while preserving omitted schema fields and open api and draft options', function (): void {
+    $initialCategory = $this->postJson('/api/formforge/v1/categories', [
+        'name' => 'Settings Events ' . Str::lower(Str::random(6)),
+    ])->assertCreated();
+    $updatedCategory = $this->postJson('/api/formforge/v1/categories', [
+        'name' => 'Settings Surveys ' . Str::lower(Str::random(6)),
+    ])->assertCreated();
+
+    $create = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Settings V1',
+        'publish_at' => '2026-10-26T08:00:00Z',
+        'pause_at' => '2026-11-01T18:00:00Z',
+        'response_limit' => 25,
+        'submission_code' => 'keep-this-code',
+        'category' => $initialCategory->json('data.slug'),
+        'drafts' => [
+            'enabled' => true,
+            'retention_days' => 7,
+        ],
+        'api' => [
+            'submission' => [
+                'auth' => 'optional',
+                'public' => true,
+                'custom' => ['provider' => 'initial'],
+            ],
+            'integration' => ['name' => 'custom-client'],
+        ],
+        'pages' => [[
+            'page_key' => 'settings-main',
+            'title' => 'Settings',
+            'fields' => [
+                [
+                    'field_key' => 'show-more-field',
+                    'type' => 'text',
+                    'name' => 'show_more',
+                    'required' => false,
+                ],
+                [
+                    'field_key' => 'details-field',
+                    'type' => 'text',
+                    'name' => 'details',
+                    'required' => false,
+                ],
+            ],
+        ]],
+        'conditions' => [[
+            'condition_key' => 'show-details-condition',
+            'target_type' => 'field',
+            'target_key' => 'details-field',
+            'action' => 'show',
+            'match' => 'all',
+            'when' => [[
+                'field_key' => 'show-more-field',
+                'operator' => 'eq',
+                'value' => 'yes',
+            ]],
+        ]],
+    ])->assertCreated();
+
+    $key = (string) $create->json('data.key');
+    $initialFieldCount = count($create->json('data.schema.fields'));
+    $initialPageCount = count($create->json('data.schema.pages'));
+
+    $patch = $this->patchJson("/api/formforge/v1/forms/{$key}", [
+        'title' => 'Settings V2',
+        'publish_at' => null,
+        'pause_at' => '2026-11-15T09:30:00Z',
+        'response_limit' => null,
+        'category' => $updatedCategory->json('data.slug'),
+        'drafts' => [
+            'enabled' => false,
+            'retention_days' => 14,
+        ],
+        'api' => [
+            'submission' => [
+                'auth' => 'required',
+                'public' => false,
+                'custom' => ['provider' => 'updated'],
+            ],
+            'integration' => ['name' => 'custom-client', 'mode' => 'extended'],
+        ],
+    ]);
+
+    $patch
+        ->assertOk()
+        ->assertJsonPath('data.version_number', 2)
+        ->assertJsonPath('data.title', 'Settings V2')
+        ->assertJsonPath('data.category', $updatedCategory->json('data.key'))
+        ->assertJsonPath('data.schema.publish_at', null)
+        ->assertJsonPath('data.schema.pause_at', '2026-11-15T09:30:00+00:00')
+        ->assertJsonPath('data.schema.response_limit', null)
+        ->assertJsonPath('data.schema.submission_code_required', true)
+        ->assertJsonPath('data.has_submission_code', true)
+        ->assertJsonPath('data.schema.drafts.enabled', false)
+        ->assertJsonPath('data.schema.drafts.retention_days', 14)
+        ->assertJsonPath('data.schema.api.submission.auth', 'required')
+        ->assertJsonPath('data.schema.api.submission.custom.provider', 'updated')
+        ->assertJsonPath('data.schema.api.integration.mode', 'extended')
+        ->assertJsonCount($initialFieldCount, 'data.schema.fields')
+        ->assertJsonCount($initialPageCount, 'data.schema.pages')
+        ->assertJsonPath('data.schema.conditions.0.target_key', 'details-field')
+        ->assertJsonMissingPath('data.meta.submission_code_hash');
+
+    expect($patch->getContent())->not->toContain('keep-this-code');
+});
+
+it('reports submission code presence without exposing the code or hash', function (): void {
+    $response = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Protected form',
+        'submission_code' => 'private-pin-value',
+        'meta' => ['integration' => 'billing'],
+        'auto_publish' => true,
+        'fields' => [
+            ['type' => 'text', 'name' => 'name', 'required' => true],
+        ],
+    ])->assertCreated()
+        ->assertJsonPath('data.has_submission_code', true)
+        ->assertJsonPath('data.meta.integration', 'billing')
+        ->assertJsonMissingPath('data.meta.submission_code_hash');
+
+    expect($response->getContent())->not->toContain('private-pin-value');
+
+    $key = (string) $response->json('data.key');
+    $publicSchema = $this->getJson("/api/formforge/v1/forms/{$key}")
+        ->assertOk()
+        ->assertJsonPath('data.submission_code_required', true)
+        ->assertJsonMissingPath('data.has_submission_code')
+        ->assertJsonMissingPath('data.submission_code_hash');
+
+    expect($publicSchema->getContent())->not->toContain('private-pin-value');
+
+    $this->patchJson("/api/formforge/v1/forms/{$key}", [
+        'meta' => ['integration' => 'updated'],
+    ])->assertOk()
+        ->assertJsonPath('data.has_submission_code', true)
+        ->assertJsonPath('data.meta.integration', 'updated')
+        ->assertJsonMissingPath('data.meta.submission_code_hash');
+
+    $this->patchJson("/api/formforge/v1/forms/{$key}", [
+        'submission_code_required' => false,
+        'submission_code' => 'must-not-remain-enabled',
+    ])->assertOk()
+        ->assertJsonPath('data.has_submission_code', false)
+        ->assertJsonPath('data.schema.submission_code_required', false)
+        ->assertJsonMissingPath('data.meta.submission_code_hash');
+});
+
+it('validates management settings and rejects enabling code protection without a code', function (): void {
+    $create = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Settings validation',
+        'fields' => [
+            ['type' => 'text', 'name' => 'name', 'required' => true],
+        ],
+    ])->assertCreated();
+
+    $key = (string) $create->json('data.key');
+
+    $this->patchJson("/api/formforge/v1/forms/{$key}", [
+        'response_limit' => 0,
+        'api' => [
+            'submission' => [
+                'auth' => 'unsupported',
+                'middleware' => ['auth', 42],
+            ],
+        ],
+        'drafts' => ['enabled' => 'not-a-boolean'],
+        'meta' => ['submission_code_hash' => 'forged-hash'],
+    ])->assertUnprocessable()
+        ->assertJsonValidationErrors([
+            'response_limit',
+            'api.submission.auth',
+            'api.submission.middleware',
+            'drafts.enabled',
+            'meta.submission_code_hash',
+        ]);
+
+    $this->patchJson("/api/formforge/v1/forms/{$key}", [
+        'submission_code_required' => true,
+    ])->assertUnprocessable();
 });
 
 it('creates and auto publishes a form when requested', function (): void {
