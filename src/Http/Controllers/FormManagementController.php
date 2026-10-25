@@ -20,6 +20,7 @@ use EvanSchleret\FormForge\Submissions\SubmissionReadService;
 use EvanSchleret\FormForge\Submissions\SubmissionExportService;
 use EvanSchleret\FormForge\Submissions\SubmissionPrivacyService;
 use EvanSchleret\FormForge\Submissions\SubmissionStatisticsService;
+use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -472,6 +473,7 @@ class FormManagementController
         $owner = $this->resolvedOwner($request, 'index');
         $perPage = $this->boundedInt($request->query('per_page', 15), 1, 100, 15);
         $filters = [
+            'key' => is_string($request->query('key')) ? trim((string) $request->query('key')) : null,
             'category' => is_string($request->query('category')) ? trim((string) $request->query('category')) : null,
             'is_published' => $request->query('is_published'),
         ];
@@ -590,7 +592,7 @@ class FormManagementController
     public function create(Request $request, FormMutationService $mutations, IdempotencyService $idempotency): JsonResponse
     {
         $owner = $this->resolvedOwner($request, 'create');
-        $payload = $request->all();
+        $payload = $this->validatedFormMutation($request, true);
         $hash = $idempotency->payloadHash($payload);
 
         try {
@@ -639,7 +641,7 @@ class FormManagementController
     ): JsonResponse {
         $key = $this->routeRequired($request, 'key');
         $owner = $this->resolvedOwner($request, 'update');
-        $payload = $request->all();
+        $payload = $this->validatedFormMutation($request, false);
         $hash = $idempotency->payloadHash($payload);
 
         try {
@@ -955,6 +957,84 @@ class FormManagementController
         $resolved = $resource->toArray($request);
 
         return is_array($resolved) ? $resolved : [];
+    }
+
+    private function validatedFormMutation(Request $request, bool $creating): array
+    {
+        $titleRules = $creating
+            ? ['required', 'string', 'min:1']
+            : ['sometimes', 'string', 'min:1'];
+
+        $middlewareRule = static function (string $attribute, mixed $value, Closure $fail): void {
+            if (is_string($value)) {
+                return;
+            }
+
+            if (! is_array($value)) {
+                $fail("The {$attribute} must be a string or an array of strings.");
+
+                return;
+            }
+
+            foreach ($value as $middleware) {
+                if (! is_string($middleware)) {
+                    $fail("The {$attribute} must be an array of strings.");
+
+                    return;
+                }
+            }
+        };
+
+        $rules = [
+            'title' => $titleRules,
+            'schema_version' => ['sometimes', 'integer', 'min:1'],
+            'publish_at' => ['sometimes', 'nullable', 'date'],
+            'pause_at' => ['sometimes', 'nullable', 'date'],
+            'response_limit' => ['sometimes', 'nullable', 'integer', 'min:1'],
+            'submission_code' => ['sometimes', 'nullable', 'string'],
+            'submission_code_required' => ['sometimes', 'boolean'],
+            'fields' => ['sometimes', 'array'],
+            'pages' => ['sometimes', 'array'],
+            'conditions' => ['sometimes', 'array'],
+            'drafts' => ['sometimes', 'array'],
+            'drafts.enabled' => ['sometimes', 'boolean'],
+            'category' => ['sometimes', 'nullable', 'string'],
+            'meta' => ['sometimes', 'array'],
+            'meta.submission_code_hash' => ['prohibited'],
+            'api' => ['sometimes', 'array'],
+            'api.formforge' => ['sometimes', 'array'],
+            'api.formforge.settings_locked' => ['sometimes', 'boolean'],
+            'auto_publish' => ['sometimes', 'boolean'],
+            'autoPublish' => ['sometimes', 'boolean'],
+        ];
+
+        foreach (['schema', 'submission', 'upload', 'resolve', 'management', 'draft'] as $endpoint) {
+            $prefix = 'api.' . $endpoint;
+            $rules[$prefix] = ['sometimes', 'array'];
+            $rules[$prefix . '.auth'] = ['sometimes', 'in:public,optional,required'];
+            $rules[$prefix . '.public'] = ['sometimes', 'boolean'];
+            $rules[$prefix . '.guard'] = ['sometimes', 'nullable', 'string'];
+            $rules[$prefix . '.middleware'] = ['sometimes', $middlewareRule];
+            $rules[$prefix . '.ability'] = ['sometimes', 'nullable', 'string'];
+            $rules[$prefix . '.abilities'] = ['sometimes', 'array'];
+            $rules[$prefix . '.abilities.*'] = ['string'];
+        }
+
+        $validated = Validator::make($request->all(), $rules)->validate();
+
+        if ($request->exists('api')) {
+            $validated['api'] = $request->input('api');
+        }
+
+        if ($request->exists('drafts')) {
+            $validated['drafts'] = $request->input('drafts');
+        }
+
+        if ($request->exists('meta')) {
+            $validated['meta'] = $request->input('meta');
+        }
+
+        return $validated;
     }
 
     private function serializeFormDefinitionCollection(Request $request, FormMutationService $mutations, array $definitions): array

@@ -18,6 +18,9 @@ class FormDefinitionHttpResource extends JsonResource
         $definition = $this->resource;
         $schema = is_array($definition->schema) ? $definition->schema : [];
         $meta = is_array($definition->meta) ? $definition->meta : [];
+        $hasSubmissionCode = is_string($meta['submission_code_hash'] ?? null)
+            && trim((string) $meta['submission_code_hash']) !== '';
+        unset($meta['submission_code_hash']);
         $category = $definition->relationLoaded('categoryModel')
             ? $definition->getRelation('categoryModel')
             : $definition->categoryModel()->first();
@@ -57,6 +60,7 @@ class FormDefinitionHttpResource extends JsonResource
             'published_at' => $definition->published_at?->toIso8601String(),
             'schema_hash' => (string) $definition->schema_hash,
             'schema' => $schema,
+            'has_submission_code' => $hasSubmissionCode,
             'meta' => $meta,
             'public_url' => $this->resolvePublicUrl($definition, $request),
             'created_by_type' => $definition->created_by_type,

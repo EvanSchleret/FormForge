@@ -122,6 +122,12 @@ class ApiBlueprint
 
             $entry = [];
 
+            foreach ($endpointConfig as $key => $value) {
+                if (! in_array($key, ['public', 'auth', 'guard', 'middleware'], true)) {
+                    $entry[$key] = $value;
+                }
+            }
+
             if (array_key_exists('public', $endpointConfig)) {
                 $entry['public'] = (bool) $endpointConfig['public'];
             }

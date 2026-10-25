@@ -1032,9 +1032,9 @@ final class FormSchemaLayout
             ];
         }
 
-        return [
+        return array_merge($drafts, [
             'enabled' => (bool) ($drafts['enabled'] ?? config('formforge.drafts.default_enabled', false)),
-        ];
+        ]);
     }
 
     private static function normalizeOptionalString(mixed $value): ?string

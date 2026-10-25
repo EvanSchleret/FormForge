@@ -174,6 +174,22 @@ class FormInstance
     public function toArray(): array
     {
         $schema = $this->schema;
+        $api = is_array($schema['api'] ?? null) ? $schema['api'] : [];
+        $formforge = is_array($api['formforge'] ?? null) ? $api['formforge'] : [];
+        unset($formforge['settings_locked']);
+
+        if ($formforge === []) {
+            unset($api['formforge']);
+        } else {
+            $api['formforge'] = $formforge;
+        }
+
+        if ($api === []) {
+            unset($schema['api']);
+        } else {
+            $schema['api'] = $api;
+        }
+
         $schema['public_url'] = $this->publicUrl();
 
         return $schema;

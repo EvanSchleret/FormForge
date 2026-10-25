@@ -44,6 +44,7 @@ class FormMutationService
             : null;
         $api = $this->normalizedArray($input['api'] ?? []);
         $meta = $this->normalizedArray($input['meta'] ?? []);
+        unset($meta['submission_code_hash']);
         $settingsLocked = $this->resolveSettingsLocked($input);
         [$meta, $submissionCodeRequired] = $this->resolveSubmissionCodeMeta($input, $meta, null, $settingsLocked);
         [$publishAt, $pauseAt, $responseLimit] = $this->resolveLifecycleSettings($input, null, $settingsLocked);
@@ -119,10 +120,23 @@ class FormMutationService
         $api = array_key_exists('api', $input)
             ? $this->normalizedArray($input['api'])
             : $this->normalizedArray($currentSchema['api'] ?? []);
+        $currentApi = $this->normalizedArray($currentSchema['api'] ?? []);
 
+        if ($this->settingsLockedFromApi($currentApi)) {
+            $formforgeApi = $this->normalizedArray($api['formforge'] ?? []);
+            $formforgeApi['settings_locked'] = true;
+            $api['formforge'] = $formforgeApi;
+        }
+
+        $currentMeta = $this->normalizedArray($latest->meta ?? []);
         $meta = array_key_exists('meta', $input)
             ? $this->normalizedArray($input['meta'])
-            : $this->normalizedArray($latest->meta ?? []);
+            : $currentMeta;
+        unset($meta['submission_code_hash']);
+
+        if (is_string($currentMeta['submission_code_hash'] ?? null) && trim((string) $currentMeta['submission_code_hash']) !== '') {
+            $meta['submission_code_hash'] = $currentMeta['submission_code_hash'];
+        }
         $settingsLocked = $this->resolveSettingsLocked($input, $currentSchema);
         [$meta, $submissionCodeRequired] = $this->resolveSubmissionCodeMeta($input, $meta, $currentSchema, $settingsLocked);
         [$publishAt, $pauseAt, $responseLimit] = $this->resolveLifecycleSettings($input, $currentSchema, $settingsLocked);
@@ -396,6 +410,16 @@ class FormMutationService
             ->orderByDesc('id');
         $this->ownership->applyScope($query, $owner);
 
+        $key = $this->normalizedOptionalString($filters['key'] ?? null);
+
+        if ($key !== null) {
+            $query->where(function (Builder $builder) use ($key): void {
+                $builder
+                    ->where('key', $key)
+                    ->orWhere('form_uuid', $key);
+            });
+        }
+
         $category = $this->normalizedOptionalString($filters['category'] ?? null);
 
         if ($category !== null) {
@@ -444,7 +468,9 @@ class FormMutationService
             'published_at' => $definition->published_at?->toIso8601String(),
             'schema_hash' => (string) $definition->schema_hash,
             'schema' => $schema,
-            'meta' => $meta,
+            'has_submission_code' => is_string($meta['submission_code_hash'] ?? null)
+                && trim((string) $meta['submission_code_hash']) !== '',
+            'meta' => $this->publicManagementMeta($meta),
             'created_by_type' => $definition->created_by_type,
             'created_by_id' => $definition->created_by_id,
             'updated_by_type' => $definition->updated_by_type,
@@ -812,10 +838,20 @@ class FormMutationService
             ? (bool) $input['submission_code_required']
             : null;
 
+        if ($requiredOverride === false) {
+            unset($meta['submission_code_hash']);
+
+            return [$meta, false];
+        }
+
         if (array_key_exists('submission_code', $input)) {
             $submissionCode = trim((string) $input['submission_code']);
 
             if ($submissionCode === '') {
+                if ($requiredOverride === true) {
+                    throw new FormForgeException('A submission code is required when protection is enabled.');
+                }
+
                 unset($meta['submission_code_hash']);
 
                 return [$meta, false];
@@ -826,10 +862,8 @@ class FormMutationService
             return [$meta, true];
         }
 
-        if ($requiredOverride === false) {
-            unset($meta['submission_code_hash']);
-
-            return [$meta, false];
+        if ($requiredOverride === true && (! is_string($meta['submission_code_hash'] ?? null) || trim((string) $meta['submission_code_hash']) === '')) {
+            throw new FormForgeException('A submission code is required when protection is enabled.');
         }
 
         $required = (bool) ($currentSchema['submission_code_required'] ?? false);
@@ -846,6 +880,13 @@ class FormMutationService
         if ($settingsLocked) {
             unset($meta['submission_code_hash']);
         }
+
+        return $meta;
+    }
+
+    private function publicManagementMeta(array $meta): array
+    {
+        unset($meta['submission_code_hash']);
 
         return $meta;
     }
