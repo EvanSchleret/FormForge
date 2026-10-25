@@ -4,6 +4,36 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog.
 
+## v2.2.0 - 2026-10-25
+
+### v2.2.0
+
+#### ✨ Highlights
+
+##### 📊 Question-level response analytics
+
+FormForge now exposes a version-aware statistics endpoint so applications can summarize survey responses without downloading individual submissions. Results include submission totals, daily or weekly trends, and per-question eligibility, answer counts, and response rates. Summaries adapt to each field type, covering choice distributions, numeric and text-length aggregates, temporal buckets, file metadata, and address-part response rates. Raw text answers are not returned, and conditional fields count as eligible only when visible.
+
+```http
+GET /api/formforge/v1/forms/{key}/statistics?version=1&granularity=week&timezone=Europe%2FZurich
+
+```
+Optional filters include a date range and `is_test`.
+
+##### 🧩 TypeScript-friendly response contracts
+
+The statistics response includes TypeBridge metadata, with Composer scripts to generate and check the TypeScript declarations used by the client package.
+
+#### 🚀 Features
+
+- **Statistics**: add the authorized `GET /forms/{key}/statistics` management route with a dedicated `management.statistics` ability, version/date/test/timezone filters, daily and weekly aggregates processed in chunks, and summaries adapted to each question type. Document the capability in the README. ([#8](https://github.com/EvanSchleret/FormForge/pull/8)) ([(de521d3)](https://github.com/EvanSchleret/FormForge/commit/de521d3)) ([(65ff41c)](https://github.com/EvanSchleret/FormForge/commit/65ff41c))
+
+#### ❤️ Contributors
+
+- @EvanSchleret
+
+Full Changelog: [v2.1.1...v2.2.0](https://github.com/EvanSchleret/FormForge/compare/v2.1.1...v2.2.0)
+
 ## v2.1.1 - 2026-09-30
 
 ### v2.1.1
@@ -37,6 +67,7 @@ Form::define('documents')
         ->maxTotalSize(10_000_000);
 
 
+
 ```
 #### 🛡️ Optional ClamAV scanning
 
@@ -48,6 +79,7 @@ FORMFORGE_CLAMAV_ENDPOINT=https://clamav.example.com/v2/scan
 FORMFORGE_CLAMAV_USERNAME=clamav-client
 FORMFORGE_CLAMAV_PASSWORD=secret
 FORMFORGE_CLAMAV_TIMEOUT=30
+
 
 
 ```
@@ -423,11 +455,13 @@ php artisan formforge:install:merge --skip-migrations --no-backup
 
 
 
+
 ```
 #### DB Migration
 
 ```bash
 php artisan migrate
+
 
 
 
