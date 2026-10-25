@@ -92,6 +92,12 @@ class ApplyEndpointOptions
             return [$form, $this->resolver->resolve('schema', $form?->toArray())];
         }
 
+        if ($endpoint === 'access') {
+            $form = $this->resolveSchemaForm($request);
+
+            return [$form, $this->resolver->resolve('access')];
+        }
+
         if ($endpoint === 'upload') {
             $form = $this->resolveSubmissionForm($request);
 

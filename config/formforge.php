@@ -251,6 +251,7 @@ return [
         'middleware' => ['api'],
         'endpoints' => [
             'schema' => true,
+            'access' => true,
             'submission' => true,
             'upload' => true,
             'resolve' => true,
@@ -271,6 +272,7 @@ return [
                 'endpoints' => [
                     'management' => true,
                     'schema' => false,
+                    'access' => true,
                     'submission' => false,
                     'upload' => false,
                     'resolve' => false,
@@ -295,6 +297,7 @@ return [
         // Each class must extend the corresponding package controller.
         'controllers' => [
             'schema' => \EvanSchleret\FormForge\Http\Controllers\FormSchemaController::class,
+            'access' => \EvanSchleret\FormForge\Http\Controllers\FormAccessController::class,
             'submission' => \EvanSchleret\FormForge\Http\Controllers\FormSubmissionController::class,
             'upload' => \EvanSchleret\FormForge\Http\Controllers\FormUploadController::class,
             'resolve' => \EvanSchleret\FormForge\Http\Controllers\FormResolveController::class,
@@ -339,6 +342,11 @@ return [
             'guard' => null,
             'middleware' => [],
             'require_published' => false,
+        ],
+        'access' => [
+            'auth' => 'public',
+            'guard' => null,
+            'middleware' => ['throttle:30,1'],
         ],
         'draft' => [
             'auth' => 'required',
@@ -390,5 +398,12 @@ return [
                 'drafts' => null,
             ],
         ],
+    ],
+
+    'access_challenge' => [
+        'cache_store' => env('FORMFORGE_ACCESS_CHALLENGE_CACHE_STORE'),
+        'challenge_ttl_seconds' => env('FORMFORGE_ACCESS_CHALLENGE_TTL', 300),
+        'authorization_ttl_seconds' => env('FORMFORGE_ACCESS_AUTHORIZATION_TTL', 900),
+        'max_attempts' => env('FORMFORGE_ACCESS_CHALLENGE_MAX_ATTEMPTS', 5),
     ],
 ];

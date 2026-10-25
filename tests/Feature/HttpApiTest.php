@@ -605,6 +605,215 @@ it('requires the submission code and closes after the response limit', function 
         ->assertJsonValidationErrors('form');
 });
 
+it('requires a successful access challenge before returning the form schema or public operations', function (): void {
+    config()->set('formforge.http.submission.require_published', false);
+    config()->set('formforge.http.upload.auth', 'public');
+    config()->set('formforge.uploads.mode', 'staged');
+    config()->set('formforge.uploads.disk', 'local');
+    config()->set('formforge.uploads.temporary_disk', 'local');
+    Storage::fake('local');
+
+    $create = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Access protected',
+        'access_code' => 'before-schema-pin',
+        'fields' => [
+            ['type' => 'text', 'name' => 'name', 'required' => true],
+            ['type' => 'file', 'name' => 'attachment', 'storage' => ['disk' => 'local', 'directory' => 'formforge-tests']],
+        ],
+    ])->assertCreated()
+        ->assertJsonPath('data.has_access_code', true)
+        ->assertJsonMissingPath('data.meta.access_code_hash');
+
+    $key = (string) $create->json('data.key');
+    config()->set('formforge.http.management.auth', 'required');
+    $definitionHash = app(\EvanSchleret\FormForge\Persistence\FormDefinitionRepository::class)
+        ->latestActive($key)?->meta['access_code_hash'] ?? null;
+
+    expect($definitionHash)->toBeString()->not->toBe('before-schema-pin');
+    expect($create->getContent())->not->toContain('before-schema-pin')->not->toContain((string) $definitionHash);
+
+    $this->getJson("/api/formforge/v1/forms/{$key}/access")
+        ->assertOk()
+        ->assertExactJson(['data' => ['required' => true]])
+        ->assertDontSee('fields');
+
+    $this->getJson("/api/formforge/v1/forms/{$key}")
+        ->assertUnauthorized()
+        ->assertJsonPath('code', 'access_required')
+        ->assertJsonMissingPath('data.fields');
+
+    $challenge = $this->postJson("/api/formforge/v1/forms/{$key}/access-challenges")
+        ->assertCreated()
+        ->assertJsonMissingPath('data.schema')
+        ->assertJsonMissingPath('data.fields');
+    $challengeId = (string) $challenge->json('data.challenge_id');
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/access-challenges/{$challengeId}/verify", [
+        'code' => 'wrong-pin',
+    ])->assertStatus(422)
+        ->assertJsonPath('code', 'invalid_code')
+        ->assertJsonPath('attempts_remaining', 4);
+
+    $authorization = $this->postJson("/api/formforge/v1/forms/{$key}/access-challenges/{$challengeId}/verify", [
+        'code' => 'before-schema-pin',
+    ])->assertOk()
+        ->assertJsonMissingPath('data.code')
+        ->assertJsonMissingPath('data.schema');
+
+    $accessToken = (string) $authorization->json('data.access_token');
+    expect($accessToken)->not->toBe('before-schema-pin');
+    expect($authorization->getContent())->not->toContain('before-schema-pin')->not->toContain((string) $definitionHash);
+
+    $this->getJson("/api/formforge/v1/forms/{$key}", ['X-FormForge-Access-Token' => $accessToken])
+        ->assertOk()
+        ->assertJsonPath('data.fields.0.name', 'name')
+        ->assertJsonMissingPath('data.has_access_code')
+        ->assertDontSee((string) $definitionHash);
+
+    $this->getJson("/api/formforge/v1/forms/{$key}/versions", ['X-FormForge-Access-Token' => $accessToken])->assertOk();
+    $this->postJson("/api/formforge/v1/forms/{$key}/resolve", [], ['X-FormForge-Access-Token' => $accessToken])->assertOk();
+    $this->postJson("/api/formforge/v1/forms/{$key}/validate-field", [
+        'field' => 'name',
+        'value' => 'Allowed',
+    ], ['X-FormForge-Access-Token' => $accessToken])->assertOk();
+    $this->post("/api/formforge/v1/forms/{$key}/uploads/stage", [
+        'field' => 'attachment',
+        'file' => UploadedFile::fake()->create('attachment.pdf', 64, 'application/pdf'),
+    ], ['X-FormForge-Access-Token' => $accessToken])->assertCreated();
+    $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'name' => 'Allowed',
+    ], ['X-FormForge-Access-Token' => $accessToken])->assertCreated();
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/drafts", [
+        'payload' => ['name' => 'Draft'],
+    ], ['X-FormForge-Access-Token' => $accessToken])->assertUnauthorized();
+
+    $this->patchJson("/api/formforge/v1/forms/{$key}", [
+        'title' => 'Cannot manage with access token',
+    ], ['X-FormForge-Access-Token' => $accessToken])->assertUnauthorized();
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/access-challenges/{$challengeId}/verify", [
+        'code' => 'before-schema-pin',
+    ])->assertStatus(410)
+        ->assertJsonPath('code', 'challenge_expired');
+});
+
+it('expires access challenges and invalidates them after the configured failed attempt limit', function (): void {
+    config()->set('formforge.access_challenge.challenge_ttl_seconds', 2);
+    config()->set('formforge.access_challenge.authorization_ttl_seconds', 2);
+    config()->set('formforge.access_challenge.max_attempts', 2);
+
+    $create = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Short challenge',
+        'access_code' => 'short-pin',
+        'fields' => [['type' => 'text', 'name' => 'name']],
+    ])->assertCreated();
+    $key = (string) $create->json('data.key');
+
+    $limitedChallenge = $this->postJson("/api/formforge/v1/forms/{$key}/access-challenges")->assertCreated();
+    $limitedId = (string) $limitedChallenge->json('data.challenge_id');
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/access-challenges/{$limitedId}/verify", ['code' => 'wrong'])
+        ->assertStatus(422)
+        ->assertJsonPath('attempts_remaining', 1);
+    $this->postJson("/api/formforge/v1/forms/{$key}/access-challenges/{$limitedId}/verify", ['code' => 'wrong'])
+        ->assertStatus(429)
+        ->assertJsonPath('code', 'attempts_exceeded');
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/access-challenges/{$limitedId}/verify", ['code' => 'short-pin'])
+        ->assertStatus(410)
+        ->assertJsonPath('code', 'challenge_expired');
+
+    $expiringChallenge = $this->postJson("/api/formforge/v1/forms/{$key}/access-challenges")->assertCreated();
+    $expiringId = (string) $expiringChallenge->json('data.challenge_id');
+    Carbon::setTestNow(Carbon::now()->addSeconds(3));
+
+    $this->postJson("/api/formforge/v1/forms/{$key}/access-challenges/{$expiringId}/verify", ['code' => 'short-pin'])
+        ->assertStatus(410)
+        ->assertJsonPath('code', 'challenge_expired');
+
+    $authorizationChallenge = $this->postJson("/api/formforge/v1/forms/{$key}/access-challenges")->assertCreated();
+    $authorizationId = (string) $authorizationChallenge->json('data.challenge_id');
+    $authorization = $this->postJson("/api/formforge/v1/forms/{$key}/access-challenges/{$authorizationId}/verify", ['code' => 'short-pin'])->assertOk();
+    $accessToken = (string) $authorization->json('data.access_token');
+    Carbon::setTestNow(Carbon::now()->addSeconds(3));
+
+    $this->getJson("/api/formforge/v1/forms/{$key}", ['X-FormForge-Access-Token' => $accessToken])
+        ->assertForbidden()
+        ->assertJsonPath('code', 'access_invalid')
+        ->assertJsonMissingPath('data.fields');
+
+    Carbon::setTestNow();
+});
+
+it('binds access challenges and authorizations to their form and scoped route', function (): void {
+    $first = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'First protected form',
+        'access_code' => 'shared-pin',
+        'fields' => [['type' => 'text', 'name' => 'name']],
+    ])->assertCreated();
+    $second = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Second protected form',
+        'access_code' => 'shared-pin',
+        'fields' => [['type' => 'text', 'name' => 'email']],
+    ])->assertCreated();
+    $firstKey = (string) $first->json('data.key');
+    $secondKey = (string) $second->json('data.key');
+
+    $challenge = $this->postJson("/api/formforge/v1/forms/{$firstKey}/access-challenges")->assertCreated();
+    $challengeId = (string) $challenge->json('data.challenge_id');
+    $this->postJson("/api/formforge/v1/forms/{$secondKey}/access-challenges/{$challengeId}/verify", ['code' => 'shared-pin'])
+        ->assertNotFound();
+
+    $authorization = $this->postJson("/api/formforge/v1/forms/{$firstKey}/access-challenges/{$challengeId}/verify", ['code' => 'shared-pin'])->assertOk();
+    $accessToken = (string) $authorization->json('data.access_token');
+    $this->getJson("/api/formforge/v1/forms/{$secondKey}", ['X-FormForge-Access-Token' => $accessToken])
+        ->assertForbidden()
+        ->assertJsonPath('code', 'access_invalid');
+
+    config()->set('formforge.http.scoped_routes', [
+        [
+            'name' => 'users',
+            'prefix' => 'users/{user}',
+            'owner' => ['route_param' => 'user', 'model' => User::class],
+            'endpoints' => ['management' => true, 'access' => true, 'schema' => true],
+        ],
+        [
+            'name' => 'members',
+            'prefix' => 'members/{user}',
+            'owner' => ['route_param' => 'user', 'model' => User::class],
+            'endpoints' => ['management' => true, 'access' => true, 'schema' => true],
+        ],
+    ]);
+    $this->app['router']->setRoutes(new RouteCollection());
+    require dirname(__DIR__, 2) . '/routes/formforge.php';
+
+    $owner = User::query()->create(['name' => 'Owner']);
+    $otherOwner = User::query()->create(['name' => 'Other owner']);
+    $scoped = $this->postJson("/api/formforge/v1/users/{$owner->getKey()}/forms", [
+        'title' => 'Scoped access form',
+        'access_code' => 'scoped-pin',
+        'fields' => [['type' => 'text', 'name' => 'name']],
+    ])->assertCreated();
+    $scopedKey = (string) $scoped->json('data.key');
+
+    $scopedChallenge = $this->postJson("/api/formforge/v1/users/{$owner->getKey()}/forms/{$scopedKey}/access-challenges")->assertCreated();
+    $scopedChallengeId = (string) $scopedChallenge->json('data.challenge_id');
+    $this->postJson("/api/formforge/v1/members/{$owner->getKey()}/forms/{$scopedKey}/access-challenges/{$scopedChallengeId}/verify", ['code' => 'scoped-pin'])
+        ->assertNotFound();
+
+    $scopedAuthorization = $this->postJson("/api/formforge/v1/users/{$owner->getKey()}/forms/{$scopedKey}/access-challenges/{$scopedChallengeId}/verify", ['code' => 'scoped-pin'])->assertOk();
+    $this->getJson("/api/formforge/v1/users/{$otherOwner->getKey()}/forms/{$scopedKey}")
+        ->assertUnauthorized()
+        ->assertJsonMissingPath('data.fields');
+    $this->getJson("/api/formforge/v1/users/{$otherOwner->getKey()}/forms/{$scopedKey}", [
+        'X-FormForge-Access-Token' => (string) $scopedAuthorization->json('data.access_token'),
+    ])->assertForbidden();
+    $this->getJson("/api/formforge/v1/members/{$owner->getKey()}/forms/{$scopedKey}", [
+        'X-FormForge-Access-Token' => (string) $scopedAuthorization->json('data.access_token'),
+    ])->assertForbidden();
+});
+
 it('supports staged upload then JSON submit with upload_token', function (): void {
     Storage::fake('local');
 
@@ -1367,6 +1576,8 @@ it('patches form settings together while preserving omitted schema fields and op
         'pause_at' => '2026-11-01T18:00:00Z',
         'response_limit' => 25,
         'submission_code' => 'keep-this-code',
+        'access_code_required' => true,
+        'access_code' => 'keep-this-access-code',
         'category' => $initialCategory->json('data.slug'),
         'drafts' => [
             'enabled' => true,
@@ -1446,6 +1657,7 @@ it('patches form settings together while preserving omitted schema fields and op
         ->assertJsonPath('data.schema.response_limit', null)
         ->assertJsonPath('data.schema.submission_code_required', true)
         ->assertJsonPath('data.has_submission_code', true)
+        ->assertJsonPath('data.has_access_code', true)
         ->assertJsonPath('data.schema.drafts.enabled', false)
         ->assertJsonPath('data.schema.drafts.retention_days', 14)
         ->assertJsonPath('data.schema.api.submission.auth', 'required')
@@ -1454,9 +1666,22 @@ it('patches form settings together while preserving omitted schema fields and op
         ->assertJsonCount($initialFieldCount, 'data.schema.fields')
         ->assertJsonCount($initialPageCount, 'data.schema.pages')
         ->assertJsonPath('data.schema.conditions.0.target_key', 'details-field')
-        ->assertJsonMissingPath('data.meta.submission_code_hash');
+        ->assertJsonMissingPath('data.meta.submission_code_hash')
+        ->assertJsonMissingPath('data.meta.access_code_hash');
 
-    expect($patch->getContent())->not->toContain('keep-this-code');
+    expect($patch->getContent())->not->toContain('keep-this-code')->not->toContain('keep-this-access-code');
+
+    $this->patchJson("/api/formforge/v1/forms/{$key}", [
+        'title' => 'Settings V3',
+    ])->assertOk()
+        ->assertJsonPath('data.has_access_code', true)
+        ->assertJsonMissingPath('data.meta.access_code_hash');
+
+    $this->patchJson("/api/formforge/v1/forms/{$key}", [
+        'access_code_required' => false,
+    ])->assertOk()
+        ->assertJsonPath('data.has_access_code', false)
+        ->assertJsonMissingPath('data.meta.access_code_hash');
 });
 
 it('reports submission code presence without exposing the code or hash', function (): void {
@@ -1528,6 +1753,20 @@ it('validates management settings and rejects enabling code protection without a
             'drafts.enabled',
             'meta.submission_code_hash',
         ]);
+
+    $this->patchJson("/api/formforge/v1/forms/{$key}", [
+        'access_code_required' => true,
+    ])->assertUnprocessable();
+
+    $this->patchJson("/api/formforge/v1/forms/{$key}", [
+        'meta' => ['access_code_hash' => 'forged-hash'],
+    ])->assertUnprocessable()
+        ->assertJsonValidationErrors('meta.access_code_hash');
+
+    $this->patchJson("/api/formforge/v1/forms/{$key}", [
+        'access_code' => str_repeat('x', 256),
+    ])->assertUnprocessable()
+        ->assertJsonValidationErrors('access_code');
 
     $this->patchJson("/api/formforge/v1/forms/{$key}", [
         'submission_code_required' => true,
