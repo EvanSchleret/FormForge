@@ -2124,6 +2124,58 @@ it('keeps deleted forms readable through revisions endpoint for admin flows', fu
         ->assertJsonPath('data.key', $key);
 });
 
+it('deletes form responses when the form is deleted by default', function (): void {
+    $create = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Delete Responses',
+        'fields' => [
+            ['type' => 'text', 'name' => 'name', 'required' => true],
+        ],
+    ])->assertCreated();
+
+    $key = (string) $create->json('data.key');
+    $this->postJson("/api/formforge/v1/forms/{$key}/publish")->assertOk();
+
+    $submit = $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'name' => 'To delete with the form',
+    ])->assertCreated();
+    $submissionUuid = (string) $submit->json('data.id');
+
+    $this->deleteJson("/api/formforge/v1/forms/{$key}")
+        ->assertOk()
+        ->assertJsonPath('data.deleted_responses', 1);
+
+    $this->assertDatabaseMissing('formforge_submissions', [
+        'uuid' => $submissionUuid,
+        'form_key' => $key,
+    ]);
+});
+
+it('can preserve form responses when deleting a form', function (): void {
+    $create = $this->postJson('/api/formforge/v1/forms', [
+        'title' => 'Preserve Responses',
+        'fields' => [
+            ['type' => 'text', 'name' => 'name', 'required' => true],
+        ],
+    ])->assertCreated();
+
+    $key = (string) $create->json('data.key');
+    $this->postJson("/api/formforge/v1/forms/{$key}/publish")->assertOk();
+
+    $submit = $this->postJson("/api/formforge/v1/forms/{$key}/submit", [
+        'name' => 'Keep this response',
+    ])->assertCreated();
+    $submissionUuid = (string) $submit->json('data.id');
+
+    $this->deleteJson("/api/formforge/v1/forms/{$key}?delete_responses=false")
+        ->assertOk()
+        ->assertJsonPath('data.deleted_responses', 0);
+
+    $this->assertDatabaseHas('formforge_submissions', [
+        'uuid' => $submissionUuid,
+        'form_key' => $key,
+    ]);
+});
+
 it('returns a diff between two form versions', function (): void {
     $create = $this->postJson('/api/formforge/v1/forms', [
         'title' => 'Diff Form',

@@ -140,6 +140,22 @@ class SubmissionPrivacyService
         ];
     }
 
+    public function deleteResponsesForForm(string $formKey, ?OwnershipReference $owner = null): int
+    {
+        $deleted = 0;
+        $query = $this->submissions->queryForForm($formKey, owner: $owner, withFiles: true);
+
+        $query->chunkById(500, function ($submissions) use (&$deleted): void {
+            foreach ($submissions as $submission) {
+                if ($submission instanceof FormSubmission && $this->deleteSubmission($submission, true)) {
+                    $deleted++;
+                }
+            }
+        });
+
+        return $deleted;
+    }
+
     /**
      * @return array<string, int|bool>
      */

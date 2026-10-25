@@ -715,13 +715,26 @@ class FormManagementController
         );
     }
 
-    public function delete(Request $request, FormMutationService $mutations): JsonResponse
+    public function delete(
+        Request $request,
+        FormDefinitionRepository $repository,
+        FormMutationService $mutations,
+        SubmissionPrivacyService $privacy,
+    ): JsonResponse
     {
         $key = $this->routeRequired($request, 'key');
         $owner = $this->resolvedOwner($request, 'delete');
 
+        if (! $repository->keyExists($key, includeDeleted: false, owner: $owner)) {
+            throw new NotFoundHttpException("Form [{$key}] not found.");
+        }
+
+        $deletedResponses = $this->toBool($request->query('delete_responses', true))
+            ? $privacy->deleteResponsesForForm($key, $owner)
+            : 0;
+
         try {
-            $deleted = $mutations->softDelete($key, $request->user(), $owner);
+            $deletedRevisions = $mutations->softDelete($key, $request->user(), $owner);
         } catch (FormNotFoundException $exception) {
             throw new NotFoundHttpException($exception->getMessage(), $exception);
         }
@@ -729,7 +742,8 @@ class FormManagementController
         return response()->json([
             'data' => [
                 'key' => $key,
-                'deleted_revisions' => $deleted,
+                'deleted_revisions' => $deletedRevisions,
+                'deleted_responses' => $deletedResponses,
             ],
         ]);
     }
