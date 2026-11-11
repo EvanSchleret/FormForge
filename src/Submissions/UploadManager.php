@@ -7,24 +7,31 @@ namespace EvanSchleret\FormForge\Submissions;
 use EvanSchleret\FormForge\Exceptions\FormForgeException;
 use EvanSchleret\FormForge\Exceptions\UnsupportedUploadModeException;
 use EvanSchleret\FormForge\Models\StagedUpload;
-use EvanSchleret\FormForge\Support\Antivirus\FileScanner;
+use EvanSchleret\FormForge\Support\Antivirus\ScannerManager;
+use EvanSchleret\FormForge\Support\Uploads\UploadPolicy;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class UploadManager
 {
+    private array $deprecatedModesWarned = [];
+
     public function __construct(
         private readonly StagedUploadService $stagedUploads,
-        private readonly FileScanner $scanner,
+        private readonly ScannerManager $scanners,
+        private readonly UploadPolicy $uploadPolicy,
     ) {
     }
 
     public function process(array $form, array $field, mixed $value, ?Model $submittedBy = null): array
     {
         $mode = (string) config('formforge.uploads.mode', 'managed');
+        $this->warnIfDeprecatedMode($mode);
 
         return match ($mode) {
             'managed' => $this->processManaged($form, $field, $value),
@@ -36,7 +43,68 @@ class UploadManager
 
     public function stage(array $form, array $field, UploadedFile $file, ?Model $uploadedBy = null): array
     {
+        $this->warnIfDeprecatedMode('staged');
+
         return $this->stagedUploads->stage($form, $field, $file, $uploadedBy);
+    }
+
+    public function assertSubmissionSize(array $form, array $fields, array $payload, ?Model $submittedBy = null): void
+    {
+        $mode = (string) config('formforge.uploads.mode', 'managed');
+        $totalSize = 0;
+        $totalFiles = 0;
+
+        foreach ($fields as $field) {
+            if (! is_array($field) || (string) ($field['type'] ?? '') !== 'file') {
+                continue;
+            }
+
+            $name = (string) ($field['name'] ?? '');
+
+            if ($name === '' || ! array_key_exists($name, $payload)) {
+                continue;
+            }
+
+            if ($mode === 'managed') {
+                $files = $this->normalizeManagedInput($payload[$name], (bool) ($field['multiple'] ?? false));
+                $totalFiles += count($files);
+
+                foreach ($files as $file) {
+                    $totalSize += (int) ($file->getSize() ?? 0);
+                }
+
+                continue;
+            }
+
+            $items = $this->normalizeMetadataInput($payload[$name], (bool) ($field['multiple'] ?? false));
+            $totalFiles += count($items);
+
+            foreach ($items as $item) {
+                if ($mode === 'staged') {
+                    $token = trim((string) Arr::get($item, 'upload_token', ''));
+
+                    if ($token !== '') {
+                        $totalSize += $this->stagedUploads->availableTokenSize($token, $form, $field, $submittedBy);
+                        continue;
+                    }
+                }
+
+                $metadata = $this->normalizeExistingMetadata($field, $item);
+                $totalSize += (int) $metadata['size'];
+            }
+        }
+
+        if ($totalFiles > $this->uploadPolicy->maxFiles()) {
+            throw ValidationException::withMessages([
+                'uploads' => [trans('formforge::messages.upload_max_files')],
+            ]);
+        }
+
+        if ($totalSize > $this->uploadPolicy->maxSubmissionSize()) {
+            throw ValidationException::withMessages([
+                'uploads' => [trans('formforge::messages.upload_max_total_size')],
+            ]);
+        }
     }
 
     private function processManaged(array $form, array $field, mixed $value): array
@@ -101,6 +169,8 @@ class UploadManager
                 'files' => [],
             ];
         }
+
+        $this->validateStagedItemLimits($form, $field, $items, $submittedBy);
 
         $metadata = [];
 
@@ -180,6 +250,19 @@ class UploadManager
 
     private function storeUploadedFile(array $form, array $field, UploadedFile $file): array
     {
+        $maxSize = min(
+            $this->uploadPolicy->maxFileSize(isset($field['max_size']) ? (int) $field['max_size'] : null),
+            $this->uploadPolicy->maxFieldTotalSize(isset($field['max_total_size']) ? (int) $field['max_total_size'] : null),
+        );
+
+        if ((int) ($file->getSize() ?? 0) > $maxSize) {
+            throw new FormForgeException(trans('formforge::messages.staged_upload_max_size', ['max' => $maxSize]));
+        }
+
+        if (! $this->uploadPolicy->accepts($file, is_array($field['accept'] ?? null) ? $field['accept'] : [])) {
+            throw new FormForgeException(trans('formforge::messages.staged_upload_accepted_types_mismatch'));
+        }
+
         $storage = $this->resolvedStorage($field);
         $disk = $storage['disk'];
         $visibility = $storage['visibility'];
@@ -189,9 +272,7 @@ class UploadManager
         $extension = $file->getClientOriginalExtension() ?: $file->extension() ?: '';
         $storedName = $this->storedFilename($originalName, $extension);
 
-        if ((bool) config('formforge.uploads.antivirus.enabled', false)) {
-            $this->scanner->scan($file);
-        }
+        $this->scanners->scan($file);
 
         $options = [];
 
@@ -206,7 +287,7 @@ class UploadManager
         }
 
         $size = (int) ($file->getSize() ?? 0);
-        $mimeType = (string) ($file->getClientMimeType() ?: $file->getMimeType() ?: Storage::disk($disk)->mimeType($path) ?: 'application/octet-stream');
+        $mimeType = (string) ($file->getMimeType() ?: Storage::disk($disk)->mimeType($path) ?: 'application/octet-stream');
         $checksum = $this->checksumFromUploadedFile($file, $disk, $path);
 
         return [
@@ -241,7 +322,7 @@ class UploadManager
 
         $storedName = (string) Arr::get($item, 'stored_name', basename($path));
         $originalName = (string) Arr::get($item, 'original_name', $storedName);
-        $mimeType = (string) (Storage::disk($disk)->mimeType($path) ?: Arr::get($item, 'mime_type', 'application/octet-stream'));
+        $mimeType = (string) (Storage::disk($disk)->mimeType($path) ?: 'application/octet-stream');
         $extension = (string) Arr::get($item, 'extension', pathinfo($path, PATHINFO_EXTENSION));
         $size = (int) Storage::disk($disk)->size($path);
         $checksum = (string) Arr::get($item, 'checksum', $this->safeChecksum($disk, $path));
@@ -268,64 +349,100 @@ class UploadManager
 
     private function validateMetadataLimits(array $field, array $metadata): void
     {
-        $maxFiles = isset($field['max_files']) ? (int) $field['max_files'] : null;
+        $maxFiles = $this->uploadPolicy->maxFiles(isset($field['max_files']) ? (int) $field['max_files'] : null);
 
-        if ($maxFiles !== null && $maxFiles > 0 && count($metadata) > $maxFiles) {
+        if (count($metadata) > $maxFiles) {
             throw new FormForgeException(trans('formforge::messages.upload_max_files'));
         }
 
-        $maxSize = isset($field['max_size']) ? (int) $field['max_size'] : null;
-        $maxTotalSize = isset($field['max_total_size']) ? (int) $field['max_total_size'] : null;
+        $maxSize = min(
+            $this->uploadPolicy->maxFileSize(isset($field['max_size']) ? (int) $field['max_size'] : null),
+            $this->uploadPolicy->maxFieldTotalSize(isset($field['max_total_size']) ? (int) $field['max_total_size'] : null),
+        );
+        $maxTotalSize = $this->uploadPolicy->maxFieldTotalSize(isset($field['max_total_size']) ? (int) $field['max_total_size'] : null);
         $totalSize = 0;
 
         foreach ($metadata as $item) {
             $size = (int) ($item['size'] ?? 0);
             $totalSize += $size;
 
-            if ($maxSize !== null && $maxSize > 0 && $size > $maxSize) {
+            if ($size > $maxSize) {
                 throw new FormForgeException(trans('formforge::messages.staged_upload_max_size', ['max' => $maxSize]));
             }
 
-            if (! $this->metadataMatchesAccept($item, $field['accept'] ?? [])) {
+            if (! $this->uploadPolicy->acceptsMetadata($item, is_array($field['accept'] ?? null) ? $field['accept'] : [])) {
                 throw new FormForgeException(trans('formforge::messages.staged_upload_accepted_types_mismatch'));
             }
         }
 
-        if ($maxTotalSize !== null && $maxTotalSize > 0 && $totalSize > $maxTotalSize) {
+        if ($totalSize > $maxTotalSize) {
             throw new FormForgeException(trans('formforge::messages.upload_max_total_size'));
         }
     }
 
-    private function metadataMatchesAccept(array $metadata, mixed $accept): bool
+    private function warnIfDeprecatedMode(string $mode): void
     {
-        if (! is_array($accept) || $accept === []) {
-            return true;
+        if (! in_array($mode, ['staged', 'direct'], true) || isset($this->deprecatedModesWarned[$mode])) {
+            return;
         }
 
-        $extension = strtolower(ltrim((string) ($metadata['extension'] ?? ''), '.'));
-        $mimeType = strtolower((string) ($metadata['mime_type'] ?? ''));
+        $this->deprecatedModesWarned[$mode] = true;
 
-        foreach ($accept as $rawRule) {
-            $rule = strtolower(trim((string) $rawRule));
+        Log::warning('FormForge upload mode is deprecated and will be removed in 3.0.0.', [
+            'mode' => $mode,
+        ]);
+    }
 
-            if ($rule === '' || $rule === '*' || ($rule === 'image/*' && str_starts_with($mimeType, 'image/'))) {
-                return true;
-            }
-
-            if (str_starts_with($rule, '.') && $extension === ltrim($rule, '.')) {
-                return true;
-            }
-
-            if (str_contains($rule, '/') && $mimeType === $rule) {
-                return true;
-            }
-
-            if (! str_contains($rule, '/') && $extension === $rule) {
-                return true;
-            }
+    private function validateStagedItemLimits(array $form, array $field, array $items, ?Model $submittedBy): void
+    {
+        if (count($items) > $this->uploadPolicy->maxFiles(isset($field['max_files']) ? (int) $field['max_files'] : null)) {
+            throw new FormForgeException(trans('formforge::messages.upload_max_files'));
         }
 
-        return false;
+        $maxTotalSize = $this->uploadPolicy->maxFieldTotalSize(isset($field['max_total_size']) ? (int) $field['max_total_size'] : null);
+        $maxSize = min(
+            $this->uploadPolicy->maxFileSize(isset($field['max_size']) ? (int) $field['max_size'] : null),
+            $maxTotalSize,
+        );
+        $totalSize = 0;
+
+        foreach ($items as $item) {
+            $token = trim((string) Arr::get($item, 'upload_token', ''));
+
+            if ($token !== '') {
+                $size = $this->stagedUploads->availableTokenSize($token, $form, $field, $submittedBy);
+            } else {
+                $disk = trim((string) Arr::get($item, 'disk', config('formforge.uploads.temporary_disk', config('filesystems.default'))));
+                $path = trim((string) Arr::get($item, 'path', ''));
+
+                if ($path === '' || ! Storage::disk($disk)->exists($path)) {
+                    throw new FormForgeException(trans('formforge::messages.staged_file_not_found_on_disk', [
+                        'path' => $path,
+                        'disk' => $disk,
+                    ]));
+                }
+
+                $size = (int) Storage::disk($disk)->size($path);
+                $metadata = [
+                    'extension' => pathinfo($path, PATHINFO_EXTENSION),
+                    'mime_type' => Storage::disk($disk)->mimeType($path) ?: 'application/octet-stream',
+                ];
+
+                if (! $this->uploadPolicy->acceptsMetadata($metadata, is_array($field['accept'] ?? null) ? $field['accept'] : [])) {
+                    throw new FormForgeException(trans('formforge::messages.staged_upload_accepted_types_mismatch'));
+                }
+            }
+
+            if ($size > $maxSize) {
+                throw new FormForgeException(trans('formforge::messages.staged_upload_max_size', ['max' => $maxSize]));
+            }
+
+            $totalSize += $size;
+        }
+
+        if ($totalSize > $maxTotalSize) {
+            throw new FormForgeException(trans('formforge::messages.upload_max_total_size'));
+        }
     }
 
     private function commitStagedFile(array $form, array $field, array $item, ?Model $submittedBy = null): array

@@ -19,6 +19,9 @@
         "pestphp/pest-plugin-laravel": "^3.2",
         "evanschleret/laravel-typebridge": "^1.1"
     },
+    "suggest": {
+        "phpmussel/core": "Install phpMussel Core v3 to scan uploads without a separate scanning service."
+    },
     "autoload": {
         "psr-4": {
             "EvanSchleret\\FormForge\\": "src/"

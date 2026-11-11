@@ -8,8 +8,19 @@ use EvanSchleret\FormForge\Exceptions\FormForgeException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
 
-final class ClamAvRestScanner implements FileScanner
+final class ClamAvRestScanner implements FileScanner, ScannerStatusProvider
 {
+    public function status(): array
+    {
+        $endpoint = trim((string) config('formforge.uploads.antivirus.endpoint', ''));
+
+        return [
+            'ready' => $endpoint !== '',
+            'message' => $endpoint === '' ? trans('formforge::messages.upload_antivirus_endpoint_missing') : null,
+            'signature_freshness_supported' => false,
+        ];
+    }
+
     public function scan(UploadedFile $file): void
     {
         $endpoint = trim((string) config('formforge.uploads.antivirus.endpoint', ''));

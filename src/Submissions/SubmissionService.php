@@ -42,6 +42,8 @@ class SubmissionService
             $fields = [];
         }
 
+        $this->uploadManager->assertSubmissionSize($effectiveSchema, $fields, $validated, $submittedBy);
+
         $request = $request ?? $this->resolveRequest();
         $storeIp = (bool) config('formforge.submissions.store_ip', true);
         $storeUserAgent = (bool) config('formforge.submissions.store_user_agent', true);

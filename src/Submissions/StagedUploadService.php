@@ -7,7 +7,8 @@ namespace EvanSchleret\FormForge\Submissions;
 use EvanSchleret\FormForge\Exceptions\FormForgeException;
 use EvanSchleret\FormForge\Models\StagedUpload;
 use EvanSchleret\FormForge\Support\ModelClassResolver;
-use EvanSchleret\FormForge\Support\Antivirus\FileScanner;
+use EvanSchleret\FormForge\Support\Antivirus\ScannerManager;
+use EvanSchleret\FormForge\Support\Uploads\UploadPolicy;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
@@ -17,7 +18,8 @@ use Illuminate\Support\Str;
 class StagedUploadService
 {
     public function __construct(
-        private readonly FileScanner $scanner,
+        private readonly ScannerManager $scanners,
+        private readonly UploadPolicy $uploadPolicy,
     ) {
     }
 
@@ -102,7 +104,7 @@ class StagedUploadService
         }
 
         $size = (int) ($file->getSize() ?? 0);
-        $mimeType = (string) ($file->getClientMimeType() ?: $file->getMimeType() ?: Storage::disk($disk)->mimeType($path) ?: 'application/octet-stream');
+        $mimeType = (string) ($file->getMimeType() ?: Storage::disk($disk)->mimeType($path) ?: 'application/octet-stream');
         $checksum = $this->checksumFromUploadedFile($file, $disk, $path);
         $token = $this->newToken();
         $ttl = (int) config('formforge.uploads.temporary_ttl_minutes', 1440);
@@ -170,6 +172,40 @@ class StagedUploadService
         return $upload;
     }
 
+    public function availableTokenSize(
+        string $token,
+        array $form,
+        array $field,
+        ?Model $submittedBy = null,
+    ): int {
+        $candidate = trim($token);
+
+        if ($candidate === '') {
+            throw new FormForgeException(trans('formforge::messages.upload_token_empty'));
+        }
+
+        $upload = ModelClassResolver::stagedUpload()::query()
+            ->byToken($candidate)
+            ->available()
+            ->first();
+
+        if (! $upload instanceof StagedUpload) {
+            throw new FormForgeException(trans('formforge::messages.upload_token_invalid'));
+        }
+
+        $this->assertTokenMatchesFormField($upload, $form, $field);
+        $this->assertTokenOwnership($upload, $submittedBy);
+
+        if (! Storage::disk((string) $upload->disk)->exists((string) $upload->path)) {
+            throw new FormForgeException(trans('formforge::messages.staged_file_not_found_on_disk', [
+                'path' => (string) $upload->path,
+                'disk' => (string) $upload->disk,
+            ]));
+        }
+
+        return (int) Storage::disk((string) $upload->disk)->size((string) $upload->path);
+    }
+
     public function consume(StagedUpload $upload): void
     {
         $upload->forceFill([
@@ -210,68 +246,23 @@ class StagedUploadService
 
     private function scanFile(UploadedFile $file): void
     {
-        if ((bool) config('formforge.uploads.antivirus.enabled', false)) {
-            $this->scanner->scan($file);
-        }
+        $this->scanners->scan($file);
     }
 
     private function validateUploadedFile(UploadedFile $file, array $field): void
     {
-        $maxSize = isset($field['max_size']) ? (int) $field['max_size'] : null;
+        $maxSize = min(
+            $this->uploadPolicy->maxFileSize(isset($field['max_size']) ? (int) $field['max_size'] : null),
+            $this->uploadPolicy->maxFieldTotalSize(isset($field['max_total_size']) ? (int) $field['max_total_size'] : null),
+        );
 
-        if ($maxSize !== null && $maxSize > 0) {
-            $size = (int) ($file->getSize() ?? 0);
-
-            if ($size > $maxSize) {
-                throw new FormForgeException(trans('formforge::messages.staged_upload_max_size', ['max' => $maxSize]));
-            }
+        if ((int) ($file->getSize() ?? 0) > $maxSize) {
+            throw new FormForgeException(trans('formforge::messages.staged_upload_max_size', ['max' => $maxSize]));
         }
 
-        $accept = $field['accept'] ?? [];
+        $accept = is_array($field['accept'] ?? null) ? $field['accept'] : [];
 
-        if (! is_array($accept) || $accept === []) {
-            return;
-        }
-
-        $extension = strtolower((string) ($file->getClientOriginalExtension() ?: $file->extension() ?: ''));
-        $mimeType = strtolower((string) ($file->getClientMimeType() ?: $file->getMimeType() ?: ''));
-
-        $accepted = false;
-
-        foreach ($accept as $raw) {
-            $rule = strtolower(trim((string) $raw));
-
-            if ($rule === '' || $rule === '*') {
-                $accepted = true;
-                break;
-            }
-
-            if ($rule === 'image/*' && str_starts_with($mimeType, 'image/')) {
-                $accepted = true;
-                break;
-            }
-
-            if (str_starts_with($rule, '.') && $extension !== '' && $extension === ltrim($rule, '.')) {
-                $accepted = true;
-                break;
-            }
-
-            if (str_contains($rule, '/')) {
-                if ($mimeType === $rule) {
-                    $accepted = true;
-                    break;
-                }
-
-                continue;
-            }
-
-            if ($extension !== '' && $extension === $rule) {
-                $accepted = true;
-                break;
-            }
-        }
-
-        if (! $accepted) {
+        if (! $this->uploadPolicy->accepts($file, $accept)) {
             throw new FormForgeException(trans('formforge::messages.staged_upload_accepted_types_mismatch'));
         }
     }

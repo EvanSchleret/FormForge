@@ -6,6 +6,7 @@ namespace EvanSchleret\FormForge;
 
 use EvanSchleret\FormForge\Models\FormSubmission;
 use EvanSchleret\FormForge\Support\FormPublicLinkResolver;
+use EvanSchleret\FormForge\Support\Uploads\UploadPolicy;
 use EvanSchleret\FormForge\Submissions\SubmissionService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
@@ -174,6 +175,36 @@ class FormInstance
     public function toArray(): array
     {
         $schema = $this->schema;
+        $uploadPolicy = new UploadPolicy();
+        $schemaFields = is_array($schema['fields'] ?? null) ? $schema['fields'] : [];
+        $hasFileFields = false;
+
+        foreach ($schemaFields as $field) {
+            if (is_array($field) && ($field['type'] ?? null) === 'file') {
+                $hasFileFields = true;
+                break;
+            }
+        }
+
+        if ($hasFileFields) {
+            $schema['fields'] = $this->withEffectiveUploadLimits($schemaFields, $uploadPolicy);
+            $pages = is_array($schema['pages'] ?? null) ? $schema['pages'] : [];
+
+            foreach ($pages as &$page) {
+                if (is_array($page) && is_array($page['fields'] ?? null)) {
+                    $page['fields'] = $this->withEffectiveUploadLimits($page['fields'], $uploadPolicy);
+                }
+            }
+            unset($page);
+
+            $schema['pages'] = $pages;
+            $schema['upload_limits'] = [
+                'max_file_size' => $uploadPolicy->maxFileSize(),
+                'max_total_size' => $uploadPolicy->maxSubmissionSize(),
+                'max_files' => $uploadPolicy->maxFiles(),
+            ];
+        }
+
         $api = is_array($schema['api'] ?? null) ? $schema['api'] : [];
         $formforge = is_array($api['formforge'] ?? null) ? $api['formforge'] : [];
         unset($formforge['settings_locked']);
@@ -193,6 +224,26 @@ class FormInstance
         $schema['public_url'] = $this->publicUrl();
 
         return $schema;
+    }
+
+    private function withEffectiveUploadLimits(array $fields, UploadPolicy $uploadPolicy): array
+    {
+        foreach ($fields as &$field) {
+            if (! is_array($field) || ($field['type'] ?? null) !== 'file') {
+                continue;
+            }
+
+            $field['accept'] = $uploadPolicy->acceptedTypes(is_array($field['accept'] ?? null) ? $field['accept'] : []);
+            $field['max_files'] = $uploadPolicy->maxFiles(isset($field['max_files']) ? (int) $field['max_files'] : null);
+            $field['max_total_size'] = $uploadPolicy->maxFieldTotalSize(isset($field['max_total_size']) ? (int) $field['max_total_size'] : null);
+            $field['max_size'] = min(
+                $uploadPolicy->maxFileSize(isset($field['max_size']) ? (int) $field['max_size'] : null),
+                $field['max_total_size'],
+            );
+        }
+        unset($field);
+
+        return $fields;
     }
 
     public function toJson(int $options = 0): string

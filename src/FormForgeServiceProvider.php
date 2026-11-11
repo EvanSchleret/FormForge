@@ -24,6 +24,9 @@ use EvanSchleret\FormForge\Commands\MakeHttpControllerCommand;
 use EvanSchleret\FormForge\Commands\MakePolicyCommand;
 use EvanSchleret\FormForge\Commands\SyncCommand;
 use EvanSchleret\FormForge\Commands\SubmissionsExportCommand;
+use EvanSchleret\FormForge\Commands\ScannerCheckCommand;
+use EvanSchleret\FormForge\Commands\ScannerInstallCommand;
+use EvanSchleret\FormForge\Commands\ScannerUpdateCommand;
 use EvanSchleret\FormForge\Commands\UploadsCleanupCommand;
 use EvanSchleret\FormForge\Http\Authorization\ScopedRouteAuthorizer;
 use EvanSchleret\FormForge\Access\FormAccessChallengeService;
@@ -50,9 +53,11 @@ use EvanSchleret\FormForge\Submissions\DraftStateService;
 use EvanSchleret\FormForge\Submissions\StagedUploadService;
 use EvanSchleret\FormForge\Submissions\UploadManager;
 use EvanSchleret\FormForge\Support\DefaultFormPublicLinkResolver;
-use EvanSchleret\FormForge\Support\Antivirus\ClamAvRestScanner;
-use EvanSchleret\FormForge\Support\Antivirus\FileScanner;
+use EvanSchleret\FormForge\Support\Antivirus\ScannerManager;
+use EvanSchleret\FormForge\Support\Antivirus\SignatureUpdater;
 use EvanSchleret\FormForge\Support\FormPublicLinkResolver;
+use EvanSchleret\FormForge\Support\Uploads\UploadPolicy;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\ServiceProvider;
 
 class FormForgeServiceProvider extends ServiceProvider
@@ -116,18 +121,22 @@ class FormForgeServiceProvider extends ServiceProvider
             ),
         );
         $this->app->singleton(DraftStateService::class, static fn (): DraftStateService => new DraftStateService());
-        $this->app->singleton(FileScanner::class, static fn (): FileScanner => new ClamAvRestScanner());
+        $this->app->singleton(ScannerManager::class, static fn (): ScannerManager => new ScannerManager());
+        $this->app->singleton(UploadPolicy::class, static fn (): UploadPolicy => new UploadPolicy());
+        $this->app->singleton(SignatureUpdater::class, static fn (): SignatureUpdater => new SignatureUpdater());
         $this->app->singleton(
             StagedUploadService::class,
             fn (): StagedUploadService => new StagedUploadService(
-                scanner: $this->app->make(FileScanner::class),
+                scanners: $this->app->make(ScannerManager::class),
+                uploadPolicy: $this->app->make(UploadPolicy::class),
             ),
         );
         $this->app->singleton(
             UploadManager::class,
             fn (): UploadManager => new UploadManager(
                 stagedUploads: $this->app->make(StagedUploadService::class),
-                scanner: $this->app->make(FileScanner::class),
+                scanners: $this->app->make(ScannerManager::class),
+                uploadPolicy: $this->app->make(UploadPolicy::class),
             ),
         );
         $this->app->singleton(HttpOptionsResolver::class, static fn (): HttpOptionsResolver => new HttpOptionsResolver());
@@ -215,6 +224,18 @@ class FormForgeServiceProvider extends ServiceProvider
         }
 
         if ($this->app->runningInConsole()) {
+            $this->app->afterResolving(Schedule::class, function (Schedule $schedule): void {
+                if (
+                    config('formforge.uploads.scanner.driver') === 'phpmussel' &&
+                    (bool) config('formforge.uploads.scanner.phpmussel.updates_enabled', true)
+                ) {
+                    $schedule
+                        ->command('formforge:scanner:update')
+                        ->dailyAt((string) config('formforge.uploads.scanner.phpmussel.update_at', '02:00'))
+                        ->withoutOverlapping();
+                }
+            });
+
             $this->commands([
                 InstallCommand::class,
                 InstallMergeCommand::class,
@@ -230,6 +251,9 @@ class FormForgeServiceProvider extends ServiceProvider
                 HttpResolveCommand::class,
                 HttpRoutesCommand::class,
                 SubmissionsExportCommand::class,
+                ScannerInstallCommand::class,
+                ScannerCheckCommand::class,
+                ScannerUpdateCommand::class,
                 GdprRunCommand::class,
                 GdprPolicyCommand::class,
                 GdprResponseCommand::class,

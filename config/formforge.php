@@ -214,6 +214,56 @@ return [
         'visibility' => env('FORMFORGE_UPLOAD_VISIBILITY', 'private'),
         'preserve_original_filename' => env('FORMFORGE_UPLOAD_PRESERVE_FILENAME', false),
 
+        'allowed_extensions' => env('FORMFORGE_UPLOAD_ALLOWED_EXTENSIONS', ['pdf', 'jpg', 'jpeg', 'png', 'webp', 'txt']),
+        'allowed_mime_types' => [
+            'pdf' => ['application/pdf'],
+            'jpg' => ['image/jpeg'],
+            'jpeg' => ['image/jpeg'],
+            'png' => ['image/png'],
+            'webp' => ['image/webp'],
+            'txt' => ['text/plain'],
+        ],
+
+        'limits' => [
+            'max_file_size' => (int) env('FORMFORGE_UPLOAD_MAX_FILE_SIZE', 10 * 1024 * 1024),
+            'max_total_size' => (int) env('FORMFORGE_UPLOAD_MAX_TOTAL_SIZE', 20 * 1024 * 1024),
+            'max_files' => (int) env('FORMFORGE_UPLOAD_MAX_FILES', 5),
+            'multipart_reserve' => (int) env('FORMFORGE_UPLOAD_MULTIPART_RESERVE', 1024 * 1024),
+        ],
+
+        'scanner' => [
+            'driver' => env('FORMFORGE_UPLOAD_SCANNER'),
+            'drivers' => [
+                'phpmussel' => \EvanSchleret\FormForge\Support\Antivirus\PhpMusselScanner::class,
+                'clamav-rest' => \EvanSchleret\FormForge\Support\Antivirus\ClamAvRestScanner::class,
+            ],
+            'installers' => ['phpmussel'],
+            'phpmussel' => [
+                'configuration_path' => env('FORMFORGE_PHPMUSSEL_CONFIG', storage_path('app/private/formforge/phpmussel/phpmussel.yml')),
+                'cache_directory' => env('FORMFORGE_PHPMUSSEL_CACHE', storage_path('app/private/formforge/phpmussel/cache')),
+                'quarantine_directory' => env('FORMFORGE_PHPMUSSEL_QUARANTINE', storage_path('app/private/formforge/phpmussel/quarantine')),
+                'signature_directory' => env('FORMFORGE_PHPMUSSEL_SIGNATURES', storage_path('app/private/formforge/phpmussel/signatures')),
+                'state_path' => env('FORMFORGE_PHPMUSSEL_SIGNATURE_STATE', storage_path('app/private/formforge/phpmussel/signature-state.json')),
+                'signature_files' => [
+                    'clamav.cedb',
+                    'clamav.db',
+                    'clamav.fdb',
+                    'clamav.hdb',
+                    'clamav_graphics.db',
+                    'clamav_graphics_regex.db',
+                    'clamav_pdf.db',
+                    'clamav_pdf_regex.db',
+                    'clamav_regex.db',
+                ],
+                'signature_source_api' => env('FORMFORGE_PHPMUSSEL_SIGNATURE_SOURCE_API', 'https://api.github.com/repos/phpMussel/Signatures/commits'),
+                'signature_source_raw' => env('FORMFORGE_PHPMUSSEL_SIGNATURE_SOURCE_RAW', 'https://raw.githubusercontent.com/phpMussel/Signatures'),
+                'signature_max_age_days' => (int) env('FORMFORGE_PHPMUSSEL_SIGNATURE_MAX_AGE_DAYS', 7),
+                'request_timeout' => (int) env('FORMFORGE_PHPMUSSEL_SIGNATURE_TIMEOUT', 30),
+                'update_at' => env('FORMFORGE_PHPMUSSEL_SIGNATURE_UPDATE_AT', '02:00'),
+                'updates_enabled' => env('FORMFORGE_PHPMUSSEL_SIGNATURE_UPDATES_ENABLED', true),
+            ],
+        ],
+
         'temporary_disk' => env('FORMFORGE_UPLOAD_TEMP_DISK', config('filesystems.default')),
         'temporary_directory' => env('FORMFORGE_UPLOAD_TEMP_DIRECTORY', 'formforge/tmp'),
         'temporary_ttl_minutes' => env('FORMFORGE_UPLOAD_TEMP_TTL', 1440),

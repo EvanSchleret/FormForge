@@ -10,6 +10,7 @@ use EvanSchleret\FormForge\Exceptions\FormForgeException;
 use EvanSchleret\FormForge\Exceptions\UnknownFieldsException;
 use EvanSchleret\FormForge\Support\FormSchemaExportableFields;
 use EvanSchleret\FormForge\Support\ValidationLocaleResolver;
+use EvanSchleret\FormForge\Support\Uploads\UploadPolicy;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Validator;
@@ -862,22 +863,22 @@ class SubmissionValidator
                 $baseRules[] = 'array';
             }
 
-            if (isset($field['max_files'])) {
-                $baseRules[] = 'max:' . (int) $field['max_files'];
-            }
+            $baseRules[] = 'max:' . (new UploadPolicy())->maxFiles(isset($field['max_files']) ? (int) $field['max_files'] : null);
 
             $rules[$name] = $baseRules;
             $rules[$name . '.*'] = array_values(array_unique(['file', ...$acceptRules, ...$sizeRules]));
 
-            if (isset($field['max_total_size']) && (int) $field['max_total_size'] > 0) {
-                $rules[$name][] = function (string $attribute, mixed $value, Closure $fail) use ($field): void {
+            $maxTotalSize = (new UploadPolicy())->maxFieldTotalSize(isset($field['max_total_size']) ? (int) $field['max_total_size'] : null);
+
+            if ($maxTotalSize > 0) {
+                $rules[$name][] = function (string $attribute, mixed $value, Closure $fail) use ($maxTotalSize): void {
                     if (! is_array($value)) {
                         return;
                     }
 
-                    $total = array_reduce($value, static fn (int $sum, mixed $file): int => $sum + (int) ($file?->getSize() ?? 0), 0);
+                    $total = array_reduce($value, static fn (int $sum, mixed $file): int => $sum + ($file instanceof \Illuminate\Http\UploadedFile ? (int) ($file->getSize() ?? 0) : 0), 0);
 
-                    if ($total > (int) $field['max_total_size']) {
+                    if ($total > $maxTotalSize) {
                         $fail(trans('formforge::messages.upload_max_total_size'));
                     }
                 };
@@ -902,9 +903,8 @@ class SubmissionValidator
         $rules[$name] = $baseRules;
 
         if ($multiple) {
-            if (isset($field['max_files'])) {
-                $baseRules[] = 'max:' . (int) $field['max_files'];
-            }
+            $baseRules[] = 'max:' . (new UploadPolicy())->maxFiles(isset($field['max_files']) ? (int) $field['max_files'] : null);
+            $rules[$name] = $baseRules;
 
             $rules[$name . '.*'] = ['exclude_without:' . $name, 'array'];
             $rules[$name . '.*.upload_token'] = ['exclude_without:' . $name, 'nullable', 'string'];
@@ -915,22 +915,22 @@ class SubmissionValidator
             $rules[$name . '.*.mime_type'] = ['exclude_without:' . $name, 'nullable', 'string'];
             $rules[$name . '.*.extension'] = ['exclude_without:' . $name, 'nullable', 'string'];
             $sizeRules = ['exclude_without:' . $name, 'nullable', 'integer', 'min:0'];
-            if (isset($field['max_size']) && (int) $field['max_size'] > 0) {
-                $sizeRules[] = 'max:' . (int) $field['max_size'];
-            }
+            $sizeRules[] = 'max:' . (int) ceil($this->maxFieldFileSize($field) / 1024);
             $rules[$name . '.*.size'] = $sizeRules;
             $rules[$name . '.*.checksum'] = ['exclude_without:' . $name, 'nullable', 'string'];
             $rules[$name . '.*.metadata'] = ['exclude_without:' . $name, 'nullable', 'array'];
 
-            if (isset($field['max_total_size']) && (int) $field['max_total_size'] > 0) {
-                $rules[$name][] = function (string $attribute, mixed $value, Closure $fail) use ($field): void {
+            $maxTotalSize = (new UploadPolicy())->maxFieldTotalSize(isset($field['max_total_size']) ? (int) $field['max_total_size'] : null);
+
+            if ($maxTotalSize > 0) {
+                $rules[$name][] = function (string $attribute, mixed $value, Closure $fail) use ($maxTotalSize): void {
                     if (! is_array($value)) {
                         return;
                     }
 
                     $total = array_reduce($value, static fn (int $sum, mixed $item): int => $sum + (int) (is_array($item) ? ($item['size'] ?? 0) : 0), 0);
 
-                    if ($total > (int) $field['max_total_size']) {
+                    if ($total > $maxTotalSize) {
                         $fail(trans('formforge::messages.upload_max_total_size'));
                     }
                 };
@@ -947,9 +947,7 @@ class SubmissionValidator
         $rules[$name . '.mime_type'] = ['exclude_without:' . $name, 'nullable', 'string'];
         $rules[$name . '.extension'] = ['exclude_without:' . $name, 'nullable', 'string'];
         $sizeRules = ['exclude_without:' . $name, 'nullable', 'integer', 'min:0'];
-        if (isset($field['max_size']) && (int) $field['max_size'] > 0) {
-            $sizeRules[] = 'max:' . (int) $field['max_size'];
-        }
+        $sizeRules[] = 'max:' . (int) ceil($this->maxFieldFileSize($field) / 1024);
         $rules[$name . '.size'] = $sizeRules;
         $rules[$name . '.checksum'] = ['exclude_without:' . $name, 'nullable', 'string'];
         $rules[$name . '.metadata'] = ['exclude_without:' . $name, 'nullable', 'array'];
@@ -1171,7 +1169,8 @@ class SubmissionValidator
 
     private function acceptRules(array $field): array
     {
-        $accept = $field['accept'] ?? [];
+        $uploadPolicy = new UploadPolicy();
+        $accept = $uploadPolicy->acceptedTypes(is_array($field['accept'] ?? null) ? $field['accept'] : []);
 
         if (! is_array($accept) || $accept === []) {
             return [];
@@ -1210,7 +1209,13 @@ class SubmissionValidator
         $mimetypes = array_values(array_unique(array_filter($mimetypes)));
 
         if ($extensions !== []) {
+            foreach ($extensions as $extension) {
+                $mimetypes = [...$mimetypes, ...$uploadPolicy->mimeTypesFor($extension)];
+            }
+
+            $mimetypes = array_values(array_unique($mimetypes));
             $rules[] = 'extensions:' . implode(',', $extensions);
+            $rules[] = 'mimes:' . implode(',', $extensions);
         }
 
         if ($mimetypes !== []) {
@@ -1222,19 +1227,19 @@ class SubmissionValidator
 
     private function sizeRules(array $field): array
     {
-        if (! isset($field['max_size'])) {
-            return [];
-        }
-
-        $bytes = (int) $field['max_size'];
-
-        if ($bytes <= 0) {
-            return [];
-        }
-
+        $bytes = $this->maxFieldFileSize($field);
         $kilobytes = (int) ceil($bytes / 1024);
 
         return ['max:' . $kilobytes];
+    }
+
+    private function maxFieldFileSize(array $field): int
+    {
+        $uploadPolicy = new UploadPolicy();
+        $maxFileSize = $uploadPolicy->maxFileSize(isset($field['max_size']) ? (int) $field['max_size'] : null);
+        $maxTotalSize = $uploadPolicy->maxFieldTotalSize(isset($field['max_total_size']) ? (int) $field['max_total_size'] : null);
+
+        return min($maxFileSize, $maxTotalSize);
     }
 
     private function sanitizeMetadataBaseRules(array $baseRules): array
