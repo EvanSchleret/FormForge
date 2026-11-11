@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog.
 
+## v2.4.0 - 2026-11-11
+
+### v2.4.0
+
+#### ✨ Highlights
+
+##### 🛡️ PHP-aware upload validation
+
+FormForge now checks uploads against a configurable extension and MIME allowlist and enforces PHP-aware limits. The defaults allow PDF, JPEG, PNG, WebP, and plain text, with a maximum of 10 MiB per file, 20 MiB per submission, and five files. Effective limits are included in form schemas so clients can validate against them.
+
+##### 🦠 Optional virus scanning
+
+Virus scanning remains optional. When phpMussel is configured, FormForge rejects uploads if malware is detected, scanning fails, or signatures exceed the configured age limit, which defaults to seven days.
+
+> 💡 **Tip**
+
+Install `phpmussel/core` with Composer, then run `php artisan formforge:scanner:install --scanner=phpmussel`. Laravel’s scheduler refreshes signatures; use `php artisan formforge:scanner:check` to verify scanner readiness.
+
+#### 🚀 Features
+
+- **Uploads**: Add configurable extension and MIME allowlists, PHP-aware file and submission limits, and optional phpMussel and ClamAV REST scanner drivers. The `staged` and `direct` modes remain available but are deprecated and planned for removal in v3.0.0 [(693dc0f)](https://github.com/EvanSchleret/FormForge/commit/693dc0f)
+
+#### ❤️ Contributors
+
+- @EvanSchleret
+
+Full Changelog: [v2.3.1...v2.4.0](https://github.com/EvanSchleret/FormForge/compare/v2.3.1...v2.4.0)
+
 ## v2.3.1 - 2026-10-25
 
 ### v2.3.1
@@ -16,6 +44,7 @@ Deleting a form now also deletes its associated responses and uploaded response 
 
 ```http
 DELETE /api/formforge/v1/forms/{key}?delete_responses=false
+
 
 ```
 #### 🚀 Features
@@ -65,6 +94,7 @@ FormForge now exposes a version-aware statistics endpoint so applications can su
 
 ```http
 GET /api/formforge/v1/forms/{key}/statistics?version=1&granularity=week&timezone=Europe%2FZurich
+
 
 
 
@@ -121,6 +151,7 @@ Form::define('documents')
 
 
 
+
 ```
 #### 🛡️ Optional ClamAV scanning
 
@@ -132,6 +163,7 @@ FORMFORGE_CLAMAV_ENDPOINT=https://clamav.example.com/v2/scan
 FORMFORGE_CLAMAV_USERNAME=clamav-client
 FORMFORGE_CLAMAV_PASSWORD=secret
 FORMFORGE_CLAMAV_TIMEOUT=30
+
 
 
 
@@ -513,11 +545,13 @@ php artisan formforge:install:merge --skip-migrations --no-backup
 
 
 
+
 ```
 #### DB Migration
 
 ```bash
 php artisan migrate
+
 
 
 
